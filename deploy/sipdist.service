@@ -1,0 +1,21 @@
+[Unit]
+Description=SIP Channel Distributor (API + UI + ARI tracker)
+After=network-online.target postgresql.service redis-server.service redis.service asterisk.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# runs as asterisk so it can write /etc/asterisk/sipdist and run "asterisk -rx"
+User=asterisk
+Group=asterisk
+WorkingDirectory=/opt/sipdist
+ExecStart=/usr/bin/env node --env-file=/opt/sipdist/.env src/server.js
+Restart=always
+RestartSec=3
+LimitNOFILE=65536
+NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths=/etc/asterisk/sipdist
+
+[Install]
+WantedBy=multi-user.target

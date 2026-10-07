@@ -1,0 +1,22 @@
+{
+  "name": "sipdist",
+  "version": "1.0.0",
+  "description": "SIP Channel Distributor — Asterisk/PJSIP + ARI + PostgreSQL + Redis + Node.js",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "private": true,
+  "engines": { "node": ">=20.6" },
+  "scripts": {
+    "start": "node --env-file=.env src/server.js",
+    "dev": "node --env-file=.env --watch src/server.js",
+    "test": "node --test test/*.test.js",
+    "db:init": "node --env-file=.env src/cli/dbinit.js",
+    "render": "node --env-file=.env src/cli/render.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "ioredis": "^5.4.2",
+    "pg": "^8.13.1",
+    "ws": "^8.18.0"
+  }
+}
