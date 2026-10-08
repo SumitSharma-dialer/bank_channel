@@ -10,7 +10,7 @@ const PUBLIC_COLS = `t.id,t.name,t.description,t.host,t.port,t.transport,t.usern
   t.max_channels,t.cps,t.prefix,t.cli_prefix,t.strip_digits,t.codecs,t.dial_timeout,t.allow_inbound,t.active,t.created_at,t.updated_at`;
 
 function parse(b, existing) {
-  // dialing fields are no longer in the form: not sent = keep current value (new trunk = default)
+  // fields not in the form (strip_digits, codecs, dial_timeout) or not sent by an API client = keep current value
   for (const k of ['prefix', 'cli_prefix', 'strip_digits', 'codecs', 'dial_timeout']) if (b[k] === undefined && existing) b = { ...b, [k]: existing[k] };
   const host = str(b.host);
   if (!HOST_RE.test(host)) throw new Bad('host must be an IP or hostname');

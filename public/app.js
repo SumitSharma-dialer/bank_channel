@@ -309,7 +309,7 @@ function drawTrunks() {
           <button class="btn sm danger" data-del="${t.id}">Delete</button></div>
       </header>
       <div class="tc-facts">
-        <div><span>Host</span><b class="mono">${esc(t.host)}:${t.port}</b><small>${t.transport.toUpperCase()}${t.register ? ' · registers' : ''}${t.cps ? ` · max ${t.cps} CPS` : ''}</small></div>
+        <div><span>Host</span><b class="mono">${esc(t.host)}:${t.port}</b><small>${t.transport.toUpperCase()}${t.register ? ' · registers' : ''}${t.cps ? ` · max ${t.cps} CPS` : ''}${t.prefix ? ` · number prefix ${esc(t.prefix)}` : ''}${t.cli_prefix ? ` · DID prefix ${esc(t.cli_prefix)}` : ''}</small></div>
         <div><span>Live channels</span>${usage(L.live, t.max_channels)}</div>
         <div><span>Sold to processes</span><b class="num">${fmtInt(t.assigned_channels)} ch</b><small>${t.process_count} process${t.process_count === 1 ? '' : 'es'}${over ? ' · <span class="chip warn">oversubscribed</span>' : ''}</small></div>
         <div><span>Inbound calls</span>${t.allow_inbound === false ? '<b><span class="chip bad">blocked</span></b><small>all carrier calls rejected</small>'
@@ -350,7 +350,7 @@ function drawTrunks() {
 }
 async function trunkForm(t, opt = {}) {
   const procs = await api('GET', '/api/processes');
-  const v = t || { allow_inbound: true, port: 5060, transport: 'udp', register: true, max_channels: 30, cps: 0, strip_digits: 0, prefix: '', codecs: 'ulaw,alaw', dial_timeout: 60, active: true };
+  const v = t || { allow_inbound: true, port: 5060, transport: 'udp', register: true, max_channels: 30, cps: 0, strip_digits: 0, prefix: '', cli_prefix: '', codecs: 'ulaw,alaw', dial_timeout: 60, active: true };
   openModal(t ? `Edit trunk ${t.name}` : 'Add SIP trunk', `<form id="tf"><div class="fgrid">
     <label>Trunk name <small>a-z 0-9 _ (used in Asterisk as t_name)</small><input name="name" value="${esc(v.name || '')}" required pattern="[a-z0-9_]{2,32}" ${t ? '' : 'autofocus'}></label>
     <label>Description<input name="description" value="${esc(v.description || '')}" placeholder="Carrier / circle"></label>
@@ -363,6 +363,10 @@ async function trunkForm(t, opt = {}) {
     <label class="check"><input type="checkbox" name="register" ${v.register ? 'checked' : ''}> Register to carrier (needs username + password)</label>
     <div class="row"><label>From user <small>optional</small><input name="from_user" value="${esc(v.from_user || '')}"></label>
       <label>From domain <small>optional</small><input name="from_domain" value="${esc(v.from_domain || '')}"></label></div>
+    <div class="fsec">Number format (outbound)</div>
+    <div class="row"><label>Customer number prefix <small>before the last 10 digits, e.g. 0 or +91</small><input name="prefix" class="mono" value="${esc(v.prefix || '')}" pattern="\\+?[0-9]{0,20}" placeholder="none"></label>
+      <label>DID prefix <small>caller ID, before the last 10 digits</small><input name="cli_prefix" class="mono" value="${esc(v.cli_prefix || '')}" pattern="\\+?[0-9]{0,20}" placeholder="none"></label></div>
+    <p class="hint full" id="pfxPrev"></p>
     <div class="fsec">Capacity</div>
     <div class="row"><label>Total channels <small>hard limit on this trunk, 0 = unlimited</small><input name="max_channels" type="number" min="0" value="${v.max_channels}" required></label>
       <label>CPS <small>new calls per second, 0 = unlimited</small><input name="cps" type="number" min="0" max="1000" value="${v.cps || 0}" required></label></div>
@@ -396,6 +400,9 @@ async function trunkForm(t, opt = {}) {
     };
     const count = () => { list.dataset.empty = list.children.length ? '' : 'No DID ranges — outbound caller ID comes from the process, inbound calls are rejected.'; };
     (v.did_ranges || []).forEach(addRow); count();
+    // live preview of what the carrier receives (number and DID are cut to their last 10 digits first)
+    const prev = () => { $('#pfxPrev', c).innerHTML = `Sent to carrier: number <b class="mono">${esc(f.elements.prefix.value)}9876543210</b>, caller ID <b class="mono">${esc(f.elements.cli_prefix.value)}8012345678</b>`; };
+    f.elements.prefix.oninput = f.elements.cli_prefix.oninput = prev; prev();
     if (opt.addDid) { addRow(); const el = $('.did-row:last-child .d-first', list); el.scrollIntoView({ block: 'center' }); el.focus(); }
     $('#addDid', c).onclick = () => { addRow(); $('.did-row:last-child .d-first', list).focus(); };
     f.addEventListener('submit', async (e) => {
