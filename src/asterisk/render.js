@@ -244,7 +244,8 @@ function headerCheck(t) {
     ` same => n,Set(SD_HNUML=\${LEN(\${PJSIP_HEADER(read,${HDR_NUM})})})\n` +
     ` same => n,Set(SD_HDID=\${FILTER(${SAFE},\${PJSIP_HEADER(read,${HDR_DID})})})\n` +
     ` same => n,Set(SD_HNUM=\${FILTER(${SAFE},\${PJSIP_HEADER(read,${HDR_NUM})})})\n` +
-    ` same => n,Set(SD_DID=\${FILTER(0-9,\${SD_HDID})})\n` +
+    // DID and number: last 10 digits, so +91 / 91 / 0 prefixed forms all match the trunk's ranges and dial alike
+    ` same => n,Set(SD_DID=\${FILTER(0-9,\${SD_HDID}):-10})\n` +
     ` same => n,Set(SD_CNUM=\${FILTER(0-9,\${SD_HNUM})})\n` +
     ` same => n,Set(SD_HST=missing)\n` +
     ` same => n,GotoIf($[\${SD_HDIDL} = 0 | \${SD_HNUML} = 0]?nohdr)\n` +
@@ -252,6 +253,7 @@ function headerCheck(t) {
     ` same => n,Set(SD_HST=bad_number)\n` +
     ` same => n,GotoIf($[\${LEN(\${FILTER(0-9+,\${SD_HNUM})})} != \${SD_HNUML}]?nohdr)\n` +
     ` same => n,GotoIf($[\${LEN(\${SD_CNUM})} < 4 | \${LEN(\${SD_CNUM})} > 20]?nohdr)\n` +
+    ` same => n,Set(SD_CNUM=\${SD_CNUM:-10})\n` +
     ` same => n,Set(SD_HST=bad_did)\n` +
     ` same => n,GotoIf($[\${LEN(\${FILTER(0-9+,\${SD_HDID})})} != \${SD_HDIDL}]?baddid)\n` +
     (cliRanges(t).length ? ` same => n,Gosub(sd-didok-${t.name},s,1)\n` : ` same => n,Set(SD_DIDOK=0)\n`) +

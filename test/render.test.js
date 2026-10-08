@@ -65,6 +65,13 @@ test('dialplan enforces process + trunk limits with join-then-check', () => {
   assert.ok(d.indexOf('Set(GROUP(sdproc)') < d.indexOf('GROUP_COUNT(acme'), 'join before count');
 });
 
+test('dialplan uses the last 10 digits of X-DID and X-Number', () => {
+  const d = renderDialplan([proc], [trunk]);
+  assert.ok(d.includes('Set(SD_DID=${FILTER(0-9,${SD_HDID}):-10})'));
+  const len = d.indexOf('${LEN(${SD_CNUM})} > 20]?nohdr'), cut = d.indexOf('Set(SD_CNUM=${SD_CNUM:-10})');
+  assert.ok(len > 0 && cut > len, 'number length checked on all digits, then cut to 10');
+});
+
 test('inactive process -> BLOCKED, no trunk -> NO_ROUTE', () => {
   assert.ok(renderDialplan([{ ...proc, active: false }], [trunk]).includes('SD_DISP=BLOCKED'));
   assert.ok(renderDialplan([{ ...proc, trunk_id: null }], [trunk]).includes('SD_DISP=NO_ROUTE'));
