@@ -9,7 +9,7 @@ const OWN = new Set(['ANSWERED', 'BUSY', 'NO_ANSWER', 'CANCEL', 'CONGESTION', 'F
 
 // Q.850 / ISDN hangup cause -> disposition, for calls that were not answered. DIALSTATUS alone misleads: a
 // customer dialer that gives up after ringing sends CANCEL with cause 19, which is a no-answer, not a cancel.
-// Not listed (16 normal clearing, 31 unspecified, ...) = keep what DIALSTATUS says.
+// Not listed (16 normal clearing, 127 interworking, ...) = keep what DIALSTATUS says.
 const CAUSE_MAP = {
   1: 'FAILED',        // unallocated / unassigned number
   3: 'FAILED',        // no route to destination
@@ -21,6 +21,7 @@ const CAUSE_MAP = {
   22: 'FAILED',       // number changed
   27: 'FAILED',       // destination out of order
   28: 'FAILED',       // invalid number format
+  31: 'CANCEL',       // normal, unspecified: call dropped before answer
   34: 'CONGESTION',   // no circuit/channel available
   38: 'CONGESTION',   // network out of order
   41: 'CONGESTION',   // temporary failure
@@ -35,9 +36,12 @@ const BY_CAUSE = new Set(['CANCEL', 'NOANSWER', 'BUSY', 'CONGESTION']);
 
 function disposition(raw, cause) {
   const d = String(raw || '').toUpperCase();
-  if (BY_CAUSE.has(d) && CAUSE_MAP[parseInt(cause, 10)]) return CAUSE_MAP[parseInt(cause, 10)];
+  const c = parseInt(cause, 10);
+  if (BY_CAUSE.has(d) && CAUSE_MAP[c]) return CAUSE_MAP[c];
+  // a carrier reject after ringing (480 + cause 31) comes back as CHANUNAVAIL; it is a cancel, not a dead trunk
+  if (d === 'CHANUNAVAIL' && c === 31) return 'CANCEL';
   if (OWN.has(d)) return d;
   return DIAL_MAP[d] || 'FAILED';
 }
 
-module.exports = { disposition, OWN, CAUSE_MAP, BY_CAUSE };
+module.exports = { disposition, OWN };

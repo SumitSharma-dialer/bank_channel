@@ -2,7 +2,6 @@
 // Custom dispositions: each internal code (CHANNEL_LIMIT, SIP_DOWN, ...) can get its own display code
 // (e.g. LIMIT_REACH) and label; distributor rejects can also change the SIP response the customer receives.
 const router = require('express').Router();
-const { CAUSE_MAP, BY_CAUSE } = require('../disposition');
 const { q, audit } = require('../db');
 const { apply } = require('../asterisk/apply');
 const { SIP_CAUSE } = require('../asterisk/render');
@@ -12,7 +11,7 @@ const CODE_RE = /^[A-Z][A-Z0-9_]{1,15}$/;
 
 router.get('/', wrap(async (req, res) => {
   res.json({ rows: (await q('SELECT code, label, source, sip_code, sort, custom_code FROM dispositions ORDER BY sort')).rows,
-    sipCodes: Object.keys(SIP_CAUSE).map(Number), causeMap: CAUSE_MAP, causeFor: [...BY_CAUSE] });
+    sipCodes: Object.keys(SIP_CAUSE).map(Number) });
 }));
 
 router.put('/:code', wrap(async (req, res) => {
