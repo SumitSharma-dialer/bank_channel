@@ -14,7 +14,7 @@ Asterisk also listens on 4569 (IAX2), 4520 (DUNDi) and 5000 because the stock De
 
 ```
  Customer Asterisk servers                      Carrier SIP trunks
- (processes, identified by IP)                  (t_<name>)
+ (processes, by IP or user+pass)                (t_<name>)
           │  SIP INVITE to dummy number                ▲
           │  + X-DID / X-Number headers                │ Dial PJSIP/<num>@t_<trunk>
           ▼                                            │

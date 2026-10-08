@@ -66,6 +66,9 @@ change them. Either way, always pass your own values when installing.
   table. Configure `/etc/asterisk/cdr_pgsql.conf` only if you want Asterisk's own CDR too.
 - `processes.hdr_number`, `hdr_did_name` and `hdr_num_name` are stored but not used: the header names are fixed to
   `X-DID` / `X-Number` in `render.js`. `[sd-cli-<trunk>]` contexts are generated but no longer called.
+- Asterisk identifies callers by IP before username (`endpoint_identifier_order=ip,auth_username,username`). A
+  password-auth process calling from an IP that an IP-auth process lists is matched to the IP-auth process.
+- Password-auth processes receive inbound DID calls only while they are registered to this server.
 - The login rate limiter is kept in memory, so it resets when the service restarts.
 - Test data: process `tp` has allowed IP `172.0.0.1`. This is a public address, not in the private 172.16/12 range, and
   may be a typo.

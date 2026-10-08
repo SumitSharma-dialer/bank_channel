@@ -15,8 +15,8 @@
 | Session cookie signing key | env `SESSION_SECRET` | `src/auth.js` (HMAC-SHA256 of `sd_session`) | — | add to `.env`, restart (logs everyone out). **Missing on live — see [known-issues.md](known-issues.md)** |
 | Carrier trunk SIP login | `trunks.username` / `trunks.password` (plain text in DB) | `renderTrunks()` | carrier account | UI → Trunks (blank password on edit = keep) |
 | ↳ written to | `/etc/asterisk/sipdist/trunks.conf` `[t_<name>-auth]` (mode 0640) | Asterisk | | regenerated automatically |
-| Customer authentication | `processes.allowed_ips` (IP auth — current default) | `renderProcesses()` → `[p_<code>-identify] match=` | customer server public IP | UI → Processes |
-| Customer SIP password (password auth only, not used by current UI) | `processes.sip_username` / `sip_password` (plain) | `[p_<code>-auth]` in `processes.conf` | customer's `outbound_auth` | `POST /api/processes/:id/regenerate` |
+| Customer authentication | `processes.auth_type`: `ip` → `processes.allowed_ips`; `password` → `sip_username` / `sip_password` | `renderProcesses()` → `[p_<code>-identify] match=` (ip) or `[p_<code>-auth]` (password) | customer server public IP, or the customer's `outbound_auth` | UI → Processes → Authentication |
+| Customer SIP username / password (password auth) | `processes.sip_username` / `sip_password` (plain) | `[p_<code>-auth]` in `processes.conf` | customer's `outbound_auth` + registration (Peer config shows it) | UI → Processes → Edit, or Peer config → Regenerate password (`POST /api/processes/:id/regenerate`) |
 | Asterisk CDR DB login (full mode only) | `/etc/asterisk/cdr_pgsql.conf` | `cdr_pgsql.so` | DB role | not configured on live |
 
 File permissions on live:

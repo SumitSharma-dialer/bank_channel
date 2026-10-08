@@ -56,9 +56,9 @@ daily_stats (day, scope, ref)     ref = process code | trunk name | DID
 | name | varchar(128) | | display name |
 | trunk_id | int → trunks.id | | outgoing trunk |
 | channel_limit | int | 10 | max concurrent calls (≥1) |
-| auth_type | varchar(10) | password | `ip` or `password`. **The current UI/API always saves `ip`.** |
-| sip_username, sip_password | varchar | | only used for `password` auth (plain text) |
-| allowed_ips | text | '' | comma separated IPs/CIDRs → `[p_<code>-identify] match=`; first fixed IP = inbound destination |
+| auth_type | varchar(10) | password | `ip` (identified by `allowed_ips`) or `password` (identified by `sip_username`, customer registers). Chosen per process in the UI; the API defaults to `ip` when not sent |
+| sip_username, sip_password | varchar | | only for `password` auth (plain text). Username: 2–64 chars `A-Za-z0-9_.-`, defaults to `code`, unique. Password: 8–128 printable chars, no spaces or `; # [ ]`. `NULL` for `ip` auth |
+| allowed_ips | text | '' | `ip` auth only: comma separated IPs/CIDRs → `[p_<code>-identify] match=`; first fixed IP = inbound destination. Always `''` for `password` auth |
 | cli_mode | varchar(12) | dummy | `dummy` / `passthrough` / `trunk_did`; API saves `dummy` (caller ID always from `X-DID`) |
 | dummy_cli | varchar(32) | '' | the "dummy number" the customer must dial (4–20 digits) |
 | codecs | varchar(128) | ulaw,alaw | |
