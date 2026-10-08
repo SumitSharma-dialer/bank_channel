@@ -18,6 +18,9 @@ router.get('/health', wrap(async (req, res) => {
   res.json(out);
 }));
 
+// CPU / RAM / storage of this server (System page, refreshed every 5 s)
+router.get('/resources', wrap(async (req, res) => res.json(await require('../sysinfo').collect())));
+
 router.post('/apply', wrap(async (req, res) => {
   await audit(req.user, 'apply', 'system', null, null);
   await tracker.refreshMeta();

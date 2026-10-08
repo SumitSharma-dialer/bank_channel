@@ -1349,6 +1349,7 @@ DiagTab.lookup = async (el) => {
 PAGES.system = async (main) => {
   main.innerHTML = `<div class="head"><div><h1>System</h1><p>Health, generated Asterisk config, live Asterisk views and audit log.</p></div>
     <div class="actions"><button class="btn" id="reapply">Re-apply config to Asterisk</button></div></div>
+    <div class="panel" style="margin-bottom:14px"><h2>Server resources <small id="resInfo" style="font-weight:400;color:var(--ink-3);font-size:12.5px"></small></h2><div class="body"><div class="grid kpis" id="res" style="margin-bottom:0">Loading…</div></div></div>
     <div class="panel" style="margin-bottom:14px"><h2>Health</h2><div class="body"><div class="health" id="health">Loading…</div></div></div>
     <div class="panel" style="margin-bottom:14px"><h2>Where the UI meets Asterisk</h2><div class="body"><div class="tw"><table>
       <thead><tr><th>UI action</th><th>Backend</th><th>Asterisk</th></tr></thead><tbody>
@@ -1377,6 +1378,22 @@ PAGES.system = async (main) => {
       box('ARI events', h.ari, h.ari ? 'subscribed' : 'reconnecting') + box('PostgreSQL', h.db, h.dbError) + box('Redis', h.redis, h.redisError) +
       `<div class="hbox"><div class="lab">Last config apply</div><div class="v"><span class="chip ${a.ok ? 'ok' : a.ok === false ? 'bad' : ''}">${a.ok ? 'OK' : a.ok === false ? 'FAILED' : '—'}</span> <span style="font-weight:400;font-size:12.5px">${a.at ? fmtTime(a.at) : ''} ${esc(a.error || '')}</span></div></div>`;
   };
+  // CPU / RAM / storage tiles; meter turns amber at 80 %, red at 95 %
+  const gb = (b) => (b >= 1e12 ? `${(b / 1e12).toFixed(2)} TB` : `${(b / 1e9).toFixed(1)} GB`);
+  const pct = (u, t) => (t ? Math.round((u / t) * 1000) / 10 : 0);
+  const tile = (lab, p, sub) => `<div class="kpi hbox"><div class="lab">${lab}</div><div class="val">${p}<small>%</small></div>${meter(p, 100)}<div class="sub">${sub}</div></div>`;
+  const resources = async () => {
+    const r = await api('GET', '/api/system/resources');
+    const c = r.cpu, m = r.memory, d = Math.floor(r.uptime / 86400), h = Math.floor((r.uptime % 86400) / 3600);
+    $('#resInfo').textContent = `· ${r.hostname} · up ${d ? d + 'd ' : ''}${h}h · ${c.cores} cores ${c.model}`;
+    $('#res').innerHTML =
+      tile('CPU', c.percent, `load ${c.load.join(' / ')} (1 / 5 / 15 min, ${c.cores} cores)${c.asterisk != null ? ` · Asterisk ${c.asterisk}%` : ''}`) +
+      tile('RAM', pct(m.used, m.total), `${gb(m.used)} used of ${gb(m.total)} · ${gb(m.available)} free${m.swapTotal ? ` · swap ${gb(m.swapUsed)} / ${gb(m.swapTotal)}` : ''}`) +
+      r.disks.map((x) => tile(`Storage <span class="mono" style="text-transform:none;letter-spacing:0">${esc(x.mount)}</span>`, pct(x.used, x.total),
+        `${gb(x.used)} used of ${gb(x.total)} · ${gb(x.available)} free <span class="mono" style="color:var(--ink-3)" title="${esc(x.device)}">${esc(x.fstype)}</span>`)).join('');
+  };
+  clearInterval(S.resTimer);   // every 5 s while the System page is open
+  S.resTimer = setInterval(() => { if (S.page !== 'system') clearInterval(S.resTimer); else if (!document.hidden) resources().catch(() => {}); }, 5000);
   const cfg = async () => {
     const files = await api('GET', '/api/system/config-preview');
     const names = Object.keys(files); let cur = names[0];
@@ -1404,7 +1421,7 @@ PAGES.system = async (main) => {
     e.preventDefault(); $('#pwErr').textContent = '';
     try { await api('POST', '/api/system/password', formData(e.target)); e.target.reset(); toast('Password changed'); } catch (er) { $('#pwErr').textContent = er.message; }
   });
-  health().catch(() => {}); cfg().catch((e) => ($('#cfgCode').textContent = e.message)); cli('endpoints'); audit().catch(() => {});
+  resources().catch((e) => ($('#res').textContent = e.message)); health().catch(() => {}); cfg().catch((e) => ($('#cfgCode').textContent = e.message)); cli('endpoints'); audit().catch(() => {});
 };
 
 boot();

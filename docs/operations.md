@@ -127,6 +127,7 @@ Login is rate-limited to 10 failures per IP per 15 minutes.
 | `GET /api/reports/daily?from&to&scope=process|trunk|did&ref` | daily stats |
 | `GET /api/reports/dispositions` | disposition list |
 | `GET /api/system/health` | Asterisk version, ARI, DB, Redis, last apply result |
+| `GET /api/system/resources` | CPU % (two `/proc/stat` samples 0.4 s apart; idle + iowait = idle), load average, cores, Asterisk's share of all CPU; RAM used / total / available (`MemAvailable`) and swap; storage per real disk mount (ext4/xfs/…, no tmpfs/snap) used / total / free. Feeds the **Server resources** tiles on the System page (refreshed every 5 s; meter amber ≥ 80 %, red ≥ 95 %). Code `src/sysinfo.js` |
 | `POST /api/system/apply` | force re-render + reload |
 | `GET /api/system/config-preview` | rendered files |
 | `GET /api/system/cli/:what` | read-only `asterisk -rx`: `endpoints`, `registrations`, `contacts`, `groups`, `channels`, `channelstats`, `transports`, `qualify`, `rtp` |

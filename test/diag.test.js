@@ -212,3 +212,16 @@ test('parseMonContacts reads the OPTIONS ping status of IP processes', () => {
   Contact:  t_x/sip:9.9.9.9:5060                          825470dd3a Avail       3.1`;
   assert.deepStrictEqual(parseMonContacts(out), { acme: [{ ip: '1.2.3.4', port: 5060, status: 'Avail', rtt: 12.3 }, { ip: '5.6.7.8', port: 5080, status: 'Unavail', rtt: null }] });
 });
+
+test('sysinfo parsers: CPU, memory, mounts, process jiffies', () => {
+  const si = require('../src/sysinfo');
+  const a = si.parseCpuLine('cpu  100 0 100 700 100 0 0 0 0 0\ncpu0 1 2 3');
+  const b = si.parseCpuLine('cpu  200 0 200 1300 200 0 0 0 0 0');
+  assert.deepStrictEqual(a, { idle: 800, total: 1000 });
+  assert.strictEqual(si.cpuPct(a, b), 22.2);   // 900 jiffies passed, 700 of them idle + iowait -> 200 / 900 busy
+  const m = si.parseMeminfo('MemTotal:       1000 kB\nMemFree:  100 kB\nMemAvailable:    400 kB\nBuffers: 10 kB\nCached: 90 kB\nSwapTotal: 50 kB\nSwapFree: 20 kB\n');
+  assert.deepStrictEqual(m, { total: 1024000, used: 614400, available: 409600, cached: 102400, swapTotal: 51200, swapUsed: 30720 });
+  assert.deepStrictEqual(si.parseMounts('/dev/sda2 /boot ext4 rw 0 0\ntmpfs /run tmpfs rw 0 0\n/dev/loop0 /snap/core squashfs ro 0 0\n/dev/mapper/vg-lv / ext4 rw 0 0\n/dev/mapper/vg-lv /var/x ext4 rw 0 0'),
+    [{ device: '/dev/sda2', mount: '/boot', fstype: 'ext4' }, { device: '/dev/mapper/vg-lv', mount: '/', fstype: 'ext4' }]);
+  assert.strictEqual(si.parsePidJiffies('123 (my proc) S 1 2 3 4 5 6 7 8 9 10 250 50 0 0'), 300);
+});
