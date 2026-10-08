@@ -10,6 +10,7 @@ host `172.20.10.201`, app in `/opt/sipdist`, Asterisk 22.5.2 (Debian package), P
 | [asterisk.md](asterisk.md) | Which Asterisk files exist, which ones the app writes, which ones setup.sh edited, the generated dialplan logic, reload flow |
 | [credentials-and-config.md](credentials-and-config.md) | Where every password / secret / setting is stored, which file reads it and what it must match |
 | [operations.md](operations.md) | Service management, logs, HTTP API, CLI tools, troubleshooting, backup |
+| [diagnostics.md](diagnostics.md) | Diagnostics page (issue tracker, SIP trace, RTP, tcpdump, log search) and custom dispositions (LIMIT_REACH, SIP_DOWN, SIP response per reject) |
 | [known-issues.md](known-issues.md) | Problems found while writing these docs (config mismatches, dead code, schema drift) |
 
 ## One-paragraph summary

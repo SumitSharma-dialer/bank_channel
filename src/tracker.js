@@ -92,13 +92,14 @@ async function reconcile() {
 }
 
 // ------------------------------------------------------------- call records
+// CHANUNAVAIL = the far end could not be reached at all (qualify says unreachable / no contact) -> SIP_DOWN
 const DIAL_MAP = { ANSWER: 'ANSWERED', BUSY: 'BUSY', NOANSWER: 'NO_ANSWER', CANCEL: 'CANCEL',
-  CONGESTION: 'CONGESTION', CHANUNAVAIL: 'FAILED', DONTCALL: 'FAILED', TORTURE: 'FAILED', INVALIDARGS: 'FAILED' };
+  CONGESTION: 'CONGESTION', CHANUNAVAIL: 'SIP_DOWN', DONTCALL: 'FAILED', TORTURE: 'FAILED', INVALIDARGS: 'FAILED' };
 const OWN = new Set(['ANSWERED', 'BUSY', 'NO_ANSWER', 'CANCEL', 'CONGESTION', 'FAILED',
-  'CHANNEL_LIMIT', 'TRUNK_LIMIT', 'BLOCKED', 'NO_ROUTE', 'INVALID', 'OFF_HOURS', 'NO_HEADER', 'INVALID_DID']);
+  'CHANNEL_LIMIT', 'TRUNK_LIMIT', 'BLOCKED', 'NO_ROUTE', 'INVALID', 'OFF_HOURS', 'NO_HEADER', 'INVALID_DID', 'SIP_DOWN']);
 const COL = { ANSWERED: 'answered', BUSY: 'busy', NO_ANSWER: 'no_answer', CANCEL: 'cancel', CONGESTION: 'congestion',
   FAILED: 'failed', CHANNEL_LIMIT: 'channel_limit', TRUNK_LIMIT: 'trunk_limit', BLOCKED: 'blocked',
-  NO_ROUTE: 'no_route', INVALID: 'invalid', OFF_HOURS: 'off_hours', NO_HEADER: 'no_header', INVALID_DID: 'invalid_did' };
+  NO_ROUTE: 'no_route', INVALID: 'invalid', OFF_HOURS: 'off_hours', NO_HEADER: 'no_header', INVALID_DID: 'invalid_did', SIP_DOWN: 'sip_down' };
 const NOT_ON_TRUNK = new Set(['CHANNEL_LIMIT', 'BLOCKED', 'NO_ROUTE', 'INVALID', 'OFF_HOURS', 'NO_HEADER', 'INVALID_DID']);
 const HDR_STATUS = new Set(['none', 'ok', 'missing', 'bad_number', 'bad_did']);   // none = outbound call without headers
 const digits = (v, n) => (String(v || '').replace(/[^0-9]/g, '').slice(0, n) || null);

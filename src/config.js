@@ -16,7 +16,10 @@ module.exports = {
   asterisk: {
     confDir: env.ASTERISK_CONF_DIR || '/etc/asterisk/sipdist',
     reload: env.ASTERISK_RELOAD !== '0',
+    log: env.ASTERISK_LOG || '/var/log/asterisk/messages.log',
   },
+  // RTP port range of rtp.conf (used by the Diagnostics RTP capture)
+  rtp: { start: +(env.RTP_START || 10000), end: +(env.RTP_END || 20000) },
   db: {
     host: env.DB_HOST || '127.0.0.1',
     port: +(env.DB_PORT || 5432),

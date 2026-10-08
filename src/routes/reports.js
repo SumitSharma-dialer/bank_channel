@@ -5,7 +5,7 @@ const tracker = require('../tracker');
 const { wrap, str, int } = require('./util');
 
 const DISPS = ['ANSWERED', 'BUSY', 'NO_ANSWER', 'CANCEL', 'CONGESTION', 'FAILED',
-  'CHANNEL_LIMIT', 'TRUNK_LIMIT', 'BLOCKED', 'NO_ROUTE', 'INVALID', 'OFF_HOURS', 'NO_HEADER', 'INVALID_DID'];
+  'CHANNEL_LIMIT', 'TRUNK_LIMIT', 'BLOCKED', 'NO_ROUTE', 'INVALID', 'OFF_HOURS', 'NO_HEADER', 'INVALID_DID', 'SIP_DOWN'];
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function dateRange(qs) {
@@ -51,14 +51,17 @@ router.get('/calls.csv', wrap(async (req, res) => {
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', `attachment; filename="cdr_${f.from}_${f.to}.csv"`);
   const cols = ['start_time', 'answer_time', 'end_time', 'direction', 'process_code', 'trunk_name', 'src_ip', 'cli_in', 'cli_out',
-    'dialed', 'sent_number', 'did', 'hdr_status', 'hdr_did', 'hdr_num', 'disposition', 'dialstatus', 'hangup_cause', 'ring_sec', 'bill_sec', 'duration', 'uniqueid'];
+    'dialed', 'sent_number', 'did', 'hdr_status', 'hdr_did', 'hdr_num', 'disposition', 'disposition_code', 'dialstatus', 'hangup_cause', 'ring_sec', 'bill_sec', 'duration', 'uniqueid'];
   res.write(cols.join(',') + '\n');
   const esc = (v) => { if (v == null) return ''; const s = v instanceof Date ? v.toISOString() : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  // disposition_code = the custom code shown in the UI (e.g. LIMIT_REACH), else the internal code
+  const custom = Object.fromEntries((await q(`SELECT code, custom_code FROM dispositions`)).rows.map((d) => [d.code, d.custom_code || d.code]));
   let last = 0;
   // stream in chunks of 5000 by id so huge exports do not load into memory
   for (;;) {
-    const { rows } = await q(`SELECT id,${cols} FROM calls WHERE ${f.sql} AND id > ${last} ORDER BY id LIMIT 5000`, f.args);
+    const { rows } = await q(`SELECT id,${cols.filter((c) => c !== 'disposition_code')} FROM calls WHERE ${f.sql} AND id > ${last} ORDER BY id LIMIT 5000`, f.args);
     if (!rows.length) break;
+    for (const r of rows) r.disposition_code = custom[r.disposition] || r.disposition;
     for (const r of rows) res.write(cols.map((c) => esc(r[c])).join(',') + '\n');
     last = rows[rows.length - 1].id;
   }
@@ -72,7 +75,7 @@ router.get('/daily', wrap(async (req, res) => {
   let extra = '';
   if (req.query.ref) { args.push(str(req.query.ref, 32)); extra = ' AND ref=$4'; }
   const { rows } = await q(`SELECT to_char(day,'YYYY-MM-DD') AS day, ref, total, answered, busy, no_answer, cancel, congestion, failed,
-      channel_limit, trunk_limit, blocked, no_route, invalid, off_hours, no_header, invalid_did, talk_sec, peak_channels
+      channel_limit, trunk_limit, blocked, no_route, invalid, off_hours, no_header, invalid_did, sip_down, talk_sec, peak_channels
     FROM daily_stats WHERE day BETWEEN $1 AND $2 AND scope=$3${extra} ORDER BY day DESC, ref`, args);
   res.json({ from, to, scope, rows });
 }));

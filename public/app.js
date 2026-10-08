@@ -35,8 +35,11 @@ function applyToast(r, what) {
 }
 
 const DISP_CLASS = { ANSWERED: 'ok', BUSY: 'warn', NO_ANSWER: 'warn', CANCEL: '', CONGESTION: 'bad', FAILED: 'bad',
-  CHANNEL_LIMIT: 'info', TRUNK_LIMIT: 'info', BLOCKED: 'bad', NO_ROUTE: 'bad', INVALID: 'bad', OFF_HOURS: 'warn', NO_HEADER: 'bad', INVALID_DID: 'bad' };
-const dispChip = (d) => `<span class="chip ${DISP_CLASS[d] || ''}">${esc(d)}</span>`;
+  CHANNEL_LIMIT: 'info', TRUNK_LIMIT: 'info', BLOCKED: 'bad', NO_ROUTE: 'bad', INVALID: 'bad', OFF_HOURS: 'warn', NO_HEADER: 'bad', INVALID_DID: 'bad', SIP_DOWN: 'bad' };
+// custom code set on the Dispositions page (e.g. CHANNEL_LIMIT -> LIMIT_REACH), else the internal code
+const dispInfo = (d) => S.dispositions.find((x) => x.code === d) || {};
+const dispName = (d) => dispInfo(d).custom_code || d;
+const dispChip = (d) => `<span class="chip ${DISP_CLASS[d] || ''}" title="${esc(d)} — ${esc(dispInfo(d).label || '')}">${esc(dispName(d))}</span>`;
 function meter(live, max) {
   const p = max ? Math.min(100, (live / max) * 100) : 0;
   const cls = p >= 95 ? 'bad' : p >= 80 ? 'warn' : '';
@@ -90,11 +93,17 @@ function connectWs() {
   S.ws = ws;
   ws.onmessage = (m) => {
     const { type, data } = JSON.parse(m.data);
-    if (type === 'snapshot') { S.snap = data; setConn(data.ariConnected); if (S.page === 'live') Live.update(); }
+    if (type === 'snapshot') { S.snap = data; setConn(data.ariConnected); issueBadge(data.issues); if (S.page === 'live') Live.update(); }
     if (type === 'hit' && S.page === 'live') Live.hit(data);
     if (type === 'call') { S.feed.unshift(data); S.feed.length = Math.min(S.feed.length, 60); if (S.page === 'live') Live.feed(data); }
   };
   ws.onclose = () => { S.ws = null; setConn(null); setTimeout(() => { if (!$('#app').classList.contains('hidden')) connectWs(); }, 2000); };
+}
+function issueBadge(i) {
+  const b = $('#navIssues'); if (!i) return;
+  const n = i.critical + i.warning;
+  b.classList.toggle('hidden', !n); b.classList.toggle('warn', !i.critical);
+  b.textContent = n; b.title = `${i.critical} critical, ${i.warning} warning open issues`;
 }
 function setConn(ari) {
   const c = $('#conn');
@@ -668,7 +677,7 @@ PAGES.cdr = async (main) => {
       <label>To<input type="date" name="to" value="${dayStr()}"></label>
       <label>Process<select name="process"><option value="">All</option>${procs.map((p) => `<option value="${esc(p.code)}">${esc(p.code)}</option>`).join('')}</select></label>
       <label>Trunk<select name="trunk"><option value="">All</option>${trunks.map((t) => `<option>${esc(t.name)}</option>`).join('')}</select></label>
-      <label>Disposition<select name="disposition"><option value="">All</option>${S.dispositions.map((d) => `<option value="${d.code}">${esc(d.code)}</option>`).join('')}</select></label>
+      <label>Disposition<select name="disposition"><option value="">All</option>${S.dispositions.map((d) => `<option value="${d.code}">${esc(dispName(d.code))}</option>`).join('')}</select></label>
       <label>Direction<select name="direction"><option value="">All</option><option value="out">Outbound</option><option value="in">Inbound DID</option></select></label>
       <label>Number<input name="number" placeholder="contains…" class="mono"></label>
       <label>DID<input name="did" placeholder="exact DID" class="mono"></label>
@@ -684,7 +693,7 @@ PAGES.cdr = async (main) => {
       const r = await api('GET', '/api/reports/calls?' + qs());
       const ans = (r.byDisposition.find((d) => d.disposition === 'ANSWERED') || {}).n || 0;
       $('#cSum').innerHTML = `<span class="chip">${fmtInt(r.total)} calls</span><span class="chip">talk ${fmtDur(r.talkSec)}</span><span class="chip">ASR ${pct(ans, r.total)}%</span>` +
-        r.byDisposition.map((d) => `<span class="chip ${DISP_CLASS[d.disposition] || ''}">${esc(d.disposition)} ${fmtInt(d.n)}</span>`).join('');
+        r.byDisposition.map((d) => `<span class="chip ${DISP_CLASS[d.disposition] || ''}">${esc(dispName(d.disposition))} ${fmtInt(d.n)}</span>`).join('');
       $('#cBody').innerHTML = r.rows.length ? r.rows.map((c) => `<tr>
         <td class="mono" style="font-size:12.5px;white-space:nowrap">${fmtTime(c.start_time)}</td><td>${esc(c.process_code || '')}</td><td>${esc(c.trunk_name || '')}</td>
         <td class="mono">${c.direction === 'in' ? '<span class="chip info" title="inbound call to a DID">in</span> ' : ''}${esc(c.dialed || '')}</td><td class="mono" style="color:var(--ink-2)">${esc(c.sent_number || '')}</td>
@@ -712,7 +721,7 @@ PAGES.stats = async (main) => {
       <label>Only<select name="ref"><option value="">All</option></select></label>
       <div class="actions"><button class="btn primary">Show</button></div></form></div>
     <div class="panel" style="margin-bottom:14px"><h2>Calls per day</h2><div class="body" id="sChart"></div></div>
-    <div class="panel"><div class="tw"><table><thead><tr><th>Day</th><th id="refH">Process</th><th class="r">Total</th><th class="r">Answered</th><th class="r">Busy</th><th class="r">No ans.</th><th class="r">Cancel</th><th class="r">Congest.</th><th class="r">Failed</th><th class="r" title="CHANNEL_LIMIT + TRUNK_LIMIT + BLOCKED + NO_ROUTE + INVALID + OFF_HOURS + NO_HEADER + INVALID_DID">Rejected</th><th class="r">ASR</th><th class="r">ACD</th><th class="r">Talk</th><th class="r">Peak ch</th></tr></thead><tbody id="sBody"></tbody></table></div></div>`;
+    <div class="panel"><div class="tw"><table><thead><tr><th>Day</th><th id="refH">Process</th><th class="r">Total</th><th class="r">Answered</th><th class="r">Busy</th><th class="r">No ans.</th><th class="r">Cancel</th><th class="r">Congest.</th><th class="r">Failed</th><th class="r" title="trunk / far end unreachable">SIP down</th><th class="r" title="CHANNEL_LIMIT + TRUNK_LIMIT + BLOCKED + NO_ROUTE + INVALID + OFF_HOURS + NO_HEADER + INVALID_DID">Rejected</th><th class="r">ASR</th><th class="r">ACD</th><th class="r">Talk</th><th class="r">Peak ch</th></tr></thead><tbody id="sBody"></tbody></table></div></div>`;
   const f = $('#sf');
   const fillRefs = async () => {
     const list = f.scope.value === 'trunk' ? (await api('GET', '/api/trunks')).map((t) => t.name)
@@ -725,8 +734,8 @@ PAGES.stats = async (main) => {
     const reached = r.total - rej(r);
     return `<tr${label ? ' style="font-weight:600"' : ''}><td class="mono">${label || r.day}</td><td>${label ? '' : esc(r.ref)}</td>
       <td class="r num">${fmtInt(r.total)}</td><td class="r num">${fmtInt(r.answered)}</td><td class="r num">${fmtInt(r.busy)}</td><td class="r num">${fmtInt(r.no_answer)}</td>
-      <td class="r num">${fmtInt(r.cancel)}</td><td class="r num">${fmtInt(r.congestion)}</td><td class="r num">${fmtInt(r.failed)}</td>
-      <td class="r num" title="process limit ${r.channel_limit} · trunk limit ${r.trunk_limit} · blocked ${r.blocked} · no route ${r.no_route} · invalid ${r.invalid} · off hours ${r.off_hours || 0} · no header ${r.no_header || 0} · invalid DID ${r.invalid_did || 0}">${fmtInt(rej(r))}</td>
+      <td class="r num">${fmtInt(r.cancel)}</td><td class="r num">${fmtInt(r.congestion)}</td><td class="r num">${fmtInt(r.failed)}</td><td class="r num">${fmtInt(r.sip_down)}</td>
+      <td class="r num" title="process limit (${esc(dispName('CHANNEL_LIMIT'))}) ${r.channel_limit} · trunk limit ${r.trunk_limit} · blocked ${r.blocked} · no route ${r.no_route} · invalid ${r.invalid} · off hours ${r.off_hours || 0} · no header ${r.no_header || 0} · invalid DID ${r.invalid_did || 0}">${fmtInt(rej(r))}</td>
       <td class="r num">${pct(r.answered, reached)}%</td><td class="r num">${r.answered ? fmtDur(Math.round(r.talk_sec / r.answered)) : '—'}</td>
       <td class="r num">${fmtDur(r.talk_sec)}</td><td class="r num">${fmtInt(r.peak_channels)}</td></tr>`;
   };
@@ -734,11 +743,11 @@ PAGES.stats = async (main) => {
     const d = formData(f);
     $('#refH').textContent = { trunk: 'Trunk', did: 'DID' }[d.scope] || 'Process';
     const r = await api('GET', '/api/reports/daily?' + new URLSearchParams(d));
-    const keys = ['total', 'answered', 'busy', 'no_answer', 'cancel', 'congestion', 'failed', 'channel_limit', 'trunk_limit', 'blocked', 'no_route', 'invalid', 'off_hours', 'no_header', 'invalid_did', 'talk_sec'];
+    const keys = ['total', 'answered', 'busy', 'no_answer', 'cancel', 'congestion', 'failed', 'sip_down', 'channel_limit', 'trunk_limit', 'blocked', 'no_route', 'invalid', 'off_hours', 'no_header', 'invalid_did', 'talk_sec'];
     const tot = Object.fromEntries(keys.map((k) => [k, r.rows.reduce((s, x) => s + +x[k], 0)]));
     tot.peak_channels = Math.max(0, ...r.rows.map((x) => x.peak_channels));
     $('#sBody').innerHTML = r.rows.length ? r.rows.map((x) => row(x)).join('') + row(tot, 'Total')
-      : `<tr><td colspan="14" class="empty">No calls in this range.</td></tr>`;
+      : `<tr><td colspan="15" class="empty">No calls in this range.</td></tr>`;
     // per-day chart
     const days = []; for (let t = new Date(r.from + 'T00:00:00Z'); t <= new Date(r.to + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + 1)) days.push(t.toISOString().slice(0, 10));
     const by = Object.fromEntries(days.map((x) => [x, { total: 0, answered: 0, rejected: 0 }]));
@@ -764,6 +773,339 @@ function chart(el, data) {
   el.innerHTML = s + `</svg><div class="legend" style="padding:6px 0 0"><span style="color:var(--accent)">■ answered</span><span>■ other dispositions</span></div>`;
 }
 
+// =================================================================== DISPOSITIONS
+// What each disposition means and what to check (also used by Diagnostics → Call lookup)
+const DISP_HELP = {
+  ANSWERED: 'Call answered.',
+  BUSY: 'Called party busy (SIP 486 from the carrier).',
+  NO_ANSWER: 'Rang until the dial timeout, or the carrier gave 408/480.',
+  CANCEL: 'The caller hung up before answer.',
+  CONGESTION: 'Carrier answered 503 / congestion. Check carrier capacity and the reply in a SIP trace.',
+  FAILED: 'Other failure. Look at the hangup cause and a SIP trace.',
+  SIP_DOWN: 'The trunk (or, inbound, the customer server) could not be reached: qualify failed or no reply. Check IP/port, firewall and the trunk state.',
+  CHANNEL_LIMIT: 'The process already had its channel limit of calls up. Raise the limit or lower customer concurrency.',
+  TRUNK_LIMIT: 'The trunk max channels was full.',
+  BLOCKED: 'Process inactive, or this call direction is switched off for it.',
+  NO_ROUTE: 'No active trunk for the process / no process for the inbound DID.',
+  INVALID: 'Dialed number is not the process dummy number (outbound) or DID not on the trunk (inbound).',
+  OFF_HOURS: 'Outside the process working time.',
+  NO_HEADER: 'X-DID / X-Number header missing or not digits. Fix the customer dialplan.',
+  INVALID_DID: 'X-DID is not a caller-ID DID of the trunk.',
+};
+const Q850 = { 1: 'unallocated number', 3: 'no route to destination', 16: 'normal clearing', 17: 'user busy', 18: 'no user responding',
+  19: 'no answer', 20: 'subscriber absent', 21: 'call rejected', 27: 'destination out of order', 28: 'invalid number format',
+  31: 'normal, unspecified', 34: 'no circuit available', 38: 'network out of order', 41: 'temporary failure', 42: 'switching equipment congestion',
+  44: 'requested channel not available', 58: 'bearer capability not available', 102: 'timer expired', 127: 'interworking' };
+
+PAGES.dispositions = async (main) => {
+  main.innerHTML = `<div class="head"><div><h1>Dispositions</h1><p>Give any disposition your own code (shown in CDR, CSV, stats and the live feed) and choose the SIP response the customer gets when the distributor rejects a call.</p></div></div>
+    <div class="panel"><div class="tw"><table><thead><tr><th>Internal code</th><th>Shown as</th><th>Label</th><th>Set by</th><th>SIP response</th><th>Meaning</th><th></th></tr></thead><tbody id="dBody"></tbody></table></div></div>`;
+  const load = async () => {
+    const r = await api('GET', '/api/dispositions');
+    S.dispositions = r.rows;
+    $('#dBody').innerHTML = r.rows.map((d) => `<tr>
+      <td class="mono">${esc(d.code)}</td><td>${dispChip(d.code)}</td><td>${esc(d.label)}</td>
+      <td><span class="chip ${d.source === 'distributor' ? 'info' : ''}">${esc(d.source)}</span></td>
+      <td class="num">${d.sip_code || ''}${d.source === 'trunk' ? ' <small style="color:var(--ink-3)">from far end</small>' : ''}</td>
+      <td style="font-size:12.5px;color:var(--ink-2);max-width:380px">${esc(DISP_HELP[d.code] || '')}</td>
+      <td class="r"><button class="btn sm" data-edit="${esc(d.code)}">Edit</button></td></tr>`).join('');
+    $$('[data-edit]').forEach((b) => (b.onclick = () => edit(r.rows.find((x) => x.code === b.dataset.edit), r.sipCodes)));
+  };
+  const edit = (d, sipCodes) => openModal(`Disposition ${d.code}`, `<form class="mbody" id="df">
+      <label>Shown as <small>custom code, A-Z 0-9 _ (empty = ${esc(d.code)})</small><input name="custom_code" class="mono" maxlength="16" value="${esc(d.custom_code || '')}" placeholder="${esc(d.code)}" style="text-transform:uppercase"></label>
+      <label>Label<input name="label" maxlength="64" value="${esc(d.label)}"></label>
+      ${d.source === 'distributor' ? `<label>SIP response to the customer <small>changing it re-applies the dialplan</small><select name="sip_code">${sipCodes.map((c) => `<option ${c === d.sip_code ? 'selected' : ''}>${c}</option>`).join('')}</select></label>` : ''}
+      <p class="err" id="dErr"></p><div class="mfoot"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary">Save</button></div></form>`,
+    (c) => $('#df', c).addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try { const r = await api('PUT', `/api/dispositions/${d.code}`, formData(e.target)); closeModal(); r.apply ? applyToast(r, 'Disposition') : toast('Disposition saved'); load(); }
+      catch (er) { $('#dErr').textContent = er.message; }
+    }));
+  await load();
+};
+
+// =================================================================== DIAGNOSTICS
+const Diag = { tab: 'issues', timer: null, names: {} };
+const DIAG_TABS = [['issues', 'Issues'], ['sip', 'SIP trace'], ['rtp', 'RTP / audio'], ['pcap', 'Packet capture'], ['log', 'Asterisk log'], ['lookup', 'Call lookup']];
+const ago = (ms) => fmtDur(Math.max(0, Math.round((Date.now() - ms) / 1000)));
+const durBetween = (a, b) => fmtDur(Math.max(0, Math.round((new Date(b) - new Date(a)) / 1000)));
+// ip[:port] -> "trunk x" / "proc y" / "SIPDist"
+const epName = (ep) => { const ip = String(ep).replace(/:\d+$/, ''); return Diag.names[ip] || ''; };
+function diagPoll(fn, ms) {
+  clearInterval(Diag.timer);
+  const tab = Diag.tab;
+  Diag.timer = setInterval(() => { if (S.page !== 'diag' || Diag.tab !== tab || document.hidden) return; fn().catch(() => {}); }, ms);
+}
+
+PAGES.diag = async (main) => {
+  const want = (location.hash.split('?')[1] || '').replace(/^tab=/, '');
+  if (DIAG_TABS.some(([k]) => k === want)) Diag.tab = want;
+  main.innerHTML = `<div class="head"><div><h1>Diagnostics</h1><p>Find SIP and call problems: open issues, live SIP trace (like sngrep), RTP / audio quality, tcpdump capture, Asterisk log.</p></div></div>
+    <div class="tabs big" id="dTabs">${DIAG_TABS.map(([k, l]) => `<button data-t="${k}">${l}</button>`).join('')}</div><div id="dBodyMain"></div>`;
+  try {
+    const [tr, pr] = await Promise.all([api('GET', '/api/trunks'), api('GET', '/api/processes')]);
+    Diag.names = {};
+    for (const p of pr) for (const ip of String(p.allowed_ips || '').split(/[\s,]+/).filter((x) => x && !x.includes('/'))) Diag.names[ip] = `proc ${p.code}`;
+    for (const t of tr) Diag.names[t.host] = `trunk ${t.name}`;
+    if (S.me.publicIp) Diag.names[S.me.publicIp] = 'SIPDist';
+  } catch { /* names are cosmetic */ }
+  const show = (k) => {
+    Diag.tab = k; clearInterval(Diag.timer);
+    $$('#dTabs button').forEach((b) => b.classList.toggle('on', b.dataset.t === k));
+    history.replaceState(null, '', `#/diag?tab=${k}`);
+    DiagTab[k]($('#dBodyMain')).catch((e) => toast(e.message, true));
+  };
+  $$('#dTabs button').forEach((b) => (b.onclick = () => show(b.dataset.t)));
+  show(Diag.tab);
+};
+
+const DiagTab = {};
+
+// ---------------------------------------------------------------- issues
+DiagTab.issues = async (el) => {
+  el.innerHTML = `<div class="panel" style="margin-bottom:14px"><h2>Open issues <span><button class="btn sm" id="iRun">Run checks now</button></span></h2><div class="body" id="iOpen">Loading…</div></div>
+    <div class="panel"><h2>Issue history</h2><div class="tw" style="max-height:440px;overflow:auto"><table><thead><tr><th>Severity</th><th>Issue</th><th>Detail</th><th>Opened</th><th>Closed</th><th class="r">Lasted</th></tr></thead><tbody id="iHist"></tbody></table></div></div>`;
+  const draw = (r) => {
+    $('#iOpen').innerHTML = r.open.length ? r.open.map((i) => `<div class="issue ${i.severity}">
+        <div class="ih"><span class="chip ${i.severity === 'critical' ? 'bad' : 'warn'}">${esc(i.severity)}</span><b>${esc(i.title)}</b><span class="when">open ${ago(new Date(i.opened_at))} · since ${fmtTime(i.opened_at)}</span></div>
+        <div class="id">${esc(i.detail || '')}</div>${i.hint ? `<div class="ihint">→ ${esc(i.hint)}</div>` : ''}</div>`).join('')
+      : `<div class="allgood"><span class="chip ok">OK</span> No open issues. Checks run every 30 s${r.lastRun ? ` · last ${clock(r.lastRun)}` : ''}.</div>`;
+    $('#iHist').innerHTML = r.history.length ? r.history.map((i) => `<tr><td><span class="chip ${i.severity === 'critical' ? 'bad' : 'warn'}">${esc(i.severity)}</span></td>
+      <td>${esc(i.title)}</td><td style="font-size:12.5px;color:var(--ink-2)">${esc(i.detail || '')}</td>
+      <td class="mono" style="font-size:12px;white-space:nowrap">${fmtTime(i.opened_at)}</td><td class="mono" style="font-size:12px;white-space:nowrap">${fmtTime(i.closed_at)}</td>
+      <td class="r num">${durBetween(i.opened_at, i.closed_at)}</td></tr>`).join('') : `<tr><td colspan="6" class="empty">No closed issues yet.</td></tr>`;
+  };
+  const load = async () => draw(await api('GET', '/api/diag/issues'));
+  $('#iRun').onclick = async () => { $('#iRun').disabled = true; try { draw(await api('POST', '/api/diag/issues/run')); toast('Checks done'); } finally { $('#iRun').disabled = false; } };
+  await load(); diagPoll(load, 15000);
+};
+
+// ---------------------------------------------------------------- SIP trace (sngrep-like)
+const STATE_CLS = { 'IN CALL': 'ok', COMPLETED: 'ok', RINGING: 'info', 'CALL SETUP': 'info', REJECTED: 'bad', CANCELLED: 'warn' };
+DiagTab.sip = async (el) => {
+  el.innerHTML = `<div class="panel" style="margin-bottom:14px"><form class="filters" id="stf">
+      <label>Only IP<input name="host" class="mono" placeholder="carrier / customer IP"></label>
+      <label>Run for<select name="minutes"><option value="5">5 min</option><option value="10" selected>10 min</option><option value="30">30 min</option><option value="60">60 min</option></select></label>
+      <label class="check" style="max-width:none"><input type="checkbox" name="keepNoise"> include OPTIONS / REGISTER</label>
+      <div class="actions"><button class="btn primary" id="stGo">Start trace</button><button type="button" class="btn" id="stStop">Stop</button><button type="button" class="btn" id="stClr">Clear</button></div>
+    </form><div class="summary" id="stSum"></div>
+    <div class="filters" style="border-bottom:1px solid var(--line)"><label style="max-width:320px">Search <input id="stQ" class="mono" placeholder="number, DID, Call-ID, IP"></label>
+      <label style="max-width:160px">Method<select id="stM"><option value="">All</option><option>INVITE</option><option>REGISTER</option><option>OPTIONS</option></select></label></div>
+    <div class="tw" style="max-height:420px;overflow:auto"><table><thead><tr><th>Start</th><th>Method</th><th>From</th><th>To</th><th>Source</th><th>Destination</th><th class="r">Msgs</th><th>State</th><th>Codecs</th></tr></thead><tbody id="stBody"></tbody></table></div></div>
+    <div id="stFlow"></div>`;
+  const f = $('#stf');
+  const status = (st) => {
+    const err = st.error ? `<span class="chip bad" style="white-space:normal">${esc(st.error)}</span>` : '';
+    $('#stSum').innerHTML = (st.running ? `<span class="chip ok">● capturing</span><span class="chip">until ${clock(st.until)}</span>` : `<span class="chip">stopped</span>`) +
+      `<span class="chip mono">${esc(st.filter || 'no trace yet')}</span><span class="chip">${fmtInt(st.packets)} packets</span><span class="chip">${fmtInt(st.dialogs)} dialogs</span>${err}`;
+    $('#stGo').textContent = st.running ? 'Restart trace' : 'Start trace';
+  };
+  let sel = null;
+  const load = async () => {
+    const r = await api('GET', '/api/diag/sip/dialogs?' + new URLSearchParams({ q: $('#stQ').value.trim(), method: $('#stM').value }));
+    status(r.status);
+    $('#stBody').innerHTML = r.dialogs.length ? r.dialogs.map((d) => `<tr class="click ${d.callId === sel ? 'sel' : ''}" data-id="${esc(d.callId)}">
+      <td class="mono" style="font-size:12px;white-space:nowrap">${clock(d.start)}</td><td>${esc(d.method)}</td>
+      <td class="mono">${esc(d.from)}</td><td class="mono">${esc(d.to)}${d.xnum ? ` <small title="X-Number header">→ ${esc(d.xnum)}</small>` : ''}</td>
+      <td class="mono" style="font-size:12px">${esc(d.src)}<small> ${esc(epName(d.src))}</small></td><td class="mono" style="font-size:12px">${esc(d.dst)}<small> ${esc(epName(d.dst))}</small></td>
+      <td class="r num">${d.count}</td><td><span class="chip ${STATE_CLS[d.state] || ''}">${esc(d.state)}${d.code && d.state === 'REJECTED' ? ' ' + d.code : ''}</span></td>
+      <td class="mono" style="font-size:12px">${esc([...new Set(d.sdp.flatMap((s) => s.codecs))].join(' '))}</td></tr>`).join('')
+      : `<tr><td colspan="9" class="empty">${r.status.running ? 'Waiting for SIP calls…' : 'Start a trace, then place or wait for a call.'}</td></tr>`;
+    $$('#stBody tr[data-id]').forEach((tr) => (tr.onclick = () => { sel = tr.dataset.id; $$('#stBody tr').forEach((x) => x.classList.toggle('sel', x === tr)); flow(sel); }));
+  };
+  f.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try { status(await api('POST', '/api/diag/sip/start', { ...formData(f), keepNoise: f.keepNoise.checked })); toast('SIP trace started'); load(); }
+    catch (er) { toast(er.message, true); }
+  });
+  $('#stStop').onclick = async () => { status(await api('POST', '/api/diag/sip/stop')); };
+  $('#stClr').onclick = async () => { status(await api('POST', '/api/diag/sip/clear')); sel = null; $('#stFlow').innerHTML = ''; load(); };
+  $('#stQ').oninput = () => load().catch(() => {}); $('#stM').onchange = () => load().catch(() => {});
+  await load(); diagPoll(load, 2000);
+};
+
+// call flow ladder for one dialog
+async function flow(id) {
+  const box = $('#stFlow');
+  let g; try { g = await api('GET', '/api/diag/sip/dialog?id=' + encodeURIComponent(id)); } catch (e) { box.innerHTML = `<div class="panel"><div class="body">${esc(e.message)}</div></div>`; return; }
+  const eps = []; for (const m of g.msgs) for (const x of [m.src, m.dst]) if (!eps.includes(x)) eps.push(x);
+  // fixed pixel size (scrolls sideways when there are many hosts) so text never scales up or down
+  const left = 90, rowH = 30, top = 52, colW = Math.max(230, Math.floor(700 / Math.max(1, eps.length - 1)));
+  const W = left + colW * Math.max(1, eps.length - 1) + 140, H = top + rowH * g.msgs.length + 20;
+  const X = (ep) => left + 60 + eps.indexOf(ep) * colW;
+  const t0 = g.msgs.length ? g.msgs[0].ts : 0;
+  const col = (m) => (m.request ? 'var(--ink)' : m.code < 200 ? 'var(--info)' : m.code < 300 ? 'var(--accent)' : 'var(--bad)');
+  let s = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" style="display:block;font-family:var(--mono)" role="img" aria-label="SIP call flow">`;
+  eps.forEach((ep) => {
+    s += `<text x="${X(ep)}" y="16" text-anchor="middle" font-size="11.5" font-weight="600" fill="var(--ink)">${esc(ep)}</text>` +
+      `<text x="${X(ep)}" y="31" text-anchor="middle" font-size="10.5" fill="var(--ink-3)">${esc(epName(ep))}</text>` +
+      `<line x1="${X(ep)}" x2="${X(ep)}" y1="${top - 12}" y2="${H - 6}" stroke="var(--line-2)" stroke-dasharray="3 3"/>`;
+  });
+  g.msgs.forEach((m, i) => {
+    const y = top + i * rowH + 14, x1 = X(m.src), x2 = X(m.dst), dir = x2 >= x1 ? 1 : -1, c = col(m);
+    s += `<g class="arrow" data-i="${i}" style="cursor:pointer"><rect x="0" y="${y - 20}" width="${W}" height="${rowH}" fill="transparent"/>` +
+      `<text x="6" y="${y + 4}" font-size="10.5" fill="var(--ink-3)">+${((m.ts - t0) / 1000).toFixed(3)}s</text>` +
+      `<line x1="${x1}" x2="${x2 - dir * 6}" y1="${y}" y2="${y}" stroke="${c}" stroke-width="1.6"/>` +
+      `<path d="M${x2} ${y} l${-dir * 8} -4 v8 z" fill="${c}"/>` +
+      `<text x="${(x1 + x2) / 2}" y="${y - 5}" text-anchor="middle" font-size="11.5" font-weight="600" fill="${c}">${esc(m.label)}${m.sdp ? ' (SDP)' : ''}</text></g>`;
+  });
+  s += '</svg>';
+  box.innerHTML = `<div class="panel"><h2>Call flow · ${esc(g.callId)} <span><a class="btn sm" href="/api/diag/sip/dialog.pcap?id=${encodeURIComponent(g.callId)}">Download .pcap</a></span></h2>
+    <div class="body"><div class="summary" style="padding:0 0 10px">
+      <span class="chip ${STATE_CLS[g.state] || ''}">${esc(g.state)}${g.code ? ' ' + g.code + ' ' + esc(g.reason || '') : ''}</span>
+      ${g.ua ? `<span class="chip">UA ${esc(g.ua)}</span>` : ''}${g.xdid ? `<span class="chip">X-DID ${esc(g.xdid)}</span>` : ''}${g.xnum ? `<span class="chip">X-Number ${esc(g.xnum)}</span>` : ''}
+      ${g.ringAt ? `<span class="chip">ring after ${((g.ringAt - g.start) / 1000).toFixed(2)}s</span>` : ''}${g.answerAt ? `<span class="chip ok">answer after ${((g.answerAt - g.start) / 1000).toFixed(2)}s</span>` : ''}
+      ${g.msgs.filter((m) => m.sdp).map((m) => `<span class="chip" title="SDP from ${esc(m.src)}">media ${esc(m.sdp.ip)}:${m.sdp.port} ${esc(m.sdp.codecs.slice(0, 3).join('/'))}${m.sdp.dir !== 'sendrecv' ? ' ' + esc(m.sdp.dir) : ''}</span>`).join('')}
+    </div><div class="tw ladder">${s}</div><pre class="code" id="stRaw" style="margin-top:10px">Click an arrow to see the full SIP message.</pre></div></div>`;
+  $$('#stFlow .arrow').forEach((a) => (a.onclick = () => {
+    const m = g.msgs[+a.dataset.i];
+    $$('#stFlow .arrow').forEach((x) => x.classList.toggle('on', x === a));
+    $('#stRaw').textContent = `${fmtTime(m.ts)}  ${m.proto.toUpperCase()}  ${m.src} → ${m.dst}\n\n${m.raw}`;
+  }));
+  box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ---------------------------------------------------------------- RTP
+DiagTab.rtp = async (el) => {
+  el.innerHTML = `<div class="panel" style="margin-bottom:14px"><h2>Live channels — Asterisk RTP counters <span><label class="check" style="display:inline-flex;font-size:12.5px;text-transform:none;letter-spacing:0"><input type="checkbox" id="rAuto" checked> auto-refresh</label> <button class="btn sm" id="rRef">Refresh</button></span></h2>
+      <div class="tw" style="max-height:420px;overflow:auto"><table><thead><tr><th>Channel</th><th>State</th><th>Caller → number</th><th class="r">Up</th><th class="r">RX pkts</th><th class="r">RX lost</th><th class="r">RX jitter</th><th class="r">TX pkts</th><th class="r">TX lost</th><th class="r">RTT</th><th>Problems</th></tr></thead><tbody id="rBody"></tbody></table></div></div>
+    <div class="panel"><h2>Capture & analyse RTP streams <small style="text-transform:none;letter-spacing:0;font-weight:400">like tshark -z rtp,streams</small></h2>
+      <form class="filters" id="rcf"><label>Seconds<select name="seconds"><option>5</option><option selected>10</option><option>20</option><option>30</option><option>60</option></select></label>
+        <label>Only IP<input name="host" class="mono" placeholder="carrier / customer IP"></label>
+        <div class="actions"><button class="btn primary" id="rcGo">Capture</button></div></form>
+      <div class="summary" id="rcSum"></div>
+      <div class="tw"><table><thead><tr><th>Source</th><th>Destination</th><th>SSRC</th><th>Codec</th><th class="r">Packets</th><th class="r">Lost</th><th class="r">Seq err</th><th class="r">Max Δ</th><th class="r">Jitter</th><th class="r">Max jitter</th><th class="r">Dur.</th><th>Problems</th></tr></thead><tbody id="rcBody"><tr><td colspan="12" class="empty">Captures RTP on ports ${'…'} for the chosen time and reports loss, jitter and one-way audio per stream.</td></tr></tbody></table></div></div>`;
+  const live = async () => {
+    let rows;
+    try { rows = await api('GET', '/api/diag/rtp/channels'); } catch (e) { $('#rBody').innerHTML = `<tr><td colspan="11" class="empty">${esc(e.message)}</td></tr>`; return; }
+    $('#rBody').innerHTML = rows.length ? rows.map((c) => { const s = c.stats || {}; return `<tr>
+      <td class="mono" style="font-size:12px">${esc(c.name)}</td><td>${esc(c.state)}</td><td class="mono" style="font-size:12.5px">${esc(c.caller || '')} → ${esc(c.exten || c.connected || '')}</td>
+      <td class="r num">${fmtDur(c.age)}</td>
+      ${c.stats ? `<td class="r num">${fmtInt(s.rxcount)}</td><td class="r num">${fmtInt(s.rxploss)}</td><td class="r num">${s.rxjitterMs} ms</td><td class="r num">${fmtInt(s.txcount)}</td><td class="r num">${fmtInt(s.txploss)}</td><td class="r num">${s.rttMs ? s.rttMs + ' ms' : '—'}</td>`
+        : `<td colspan="6" class="empty" style="padding:6px">no RTP on this channel (yet)</td>`}
+      <td>${c.problems.map((p) => `<span class="chip bad">${esc(p)}</span>`).join(' ') || (c.stats ? '<span class="chip ok">OK</span>' : '')}</td></tr>`; }).join('')
+      : `<tr><td colspan="11" class="empty">No active SIP channels.</td></tr>`;
+  };
+  $('#rRef').onclick = () => live();
+  $('#rcf').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const d = formData(e.target); const btn = $('#rcGo'); btn.disabled = true;
+    $('#rcSum').innerHTML = `<span class="chip info">capturing for ${d.seconds}s…</span>`;
+    try {
+      const r = await api('POST', '/api/diag/rtp/capture', d);
+      const bad = r.streams.filter((x) => x.problems.length).length;
+      $('#rcSum').innerHTML = `<span class="chip">${fmtInt(r.packets)} packets</span><span class="chip">${r.streams.length} streams</span><span class="chip ${bad ? 'bad' : 'ok'}">${bad} with problems</span><span class="chip mono">${esc(r.filter)}</span>`;
+      $('#rcBody').innerHTML = r.streams.length ? r.streams.map((x) => `<tr>
+        <td class="mono" style="font-size:12px">${esc(x.src)}<small> ${esc(epName(x.src))}</small></td><td class="mono" style="font-size:12px">${esc(x.dst)}<small> ${esc(epName(x.dst))}</small></td>
+        <td class="mono" style="font-size:12px">${esc(x.ssrc)}</td><td>${esc(x.codec)}</td><td class="r num">${fmtInt(x.packets)}</td>
+        <td class="r num">${fmtInt(x.lost)} (${x.lossPct}%)</td><td class="r num">${x.seqErrors}</td><td class="r num">${x.maxDeltaMs} ms</td>
+        <td class="r num">${x.jitterMs} ms</td><td class="r num">${x.maxJitterMs} ms</td><td class="r num">${x.durationSec}s</td>
+        <td>${x.problems.map((p) => `<span class="chip bad">${esc(p)}</span>`).join(' ') || '<span class="chip ok">OK</span>'}</td></tr>`).join('')
+        : `<tr><td colspan="12" class="empty">No RTP seen — no calls up, or media does not pass this server.</td></tr>`;
+    } catch (er) { $('#rcSum').innerHTML = `<span class="chip bad" style="white-space:normal">${esc(er.message)}</span>`; }
+    finally { btn.disabled = false; }
+  });
+  const st = await api('GET', '/api/diag/status').catch(() => null);
+  if (st) $('#rcBody td.empty').textContent = `Captures RTP on UDP ${st.rtpRange.start}-${st.rtpRange.end} for the chosen time and reports loss, jitter and one-way audio per stream.`;
+  await live(); diagPoll(() => ($('#rAuto').checked ? live() : Promise.resolve()), 5000);
+};
+
+// ---------------------------------------------------------------- tcpdump
+DiagTab.pcap = async (el) => {
+  const st = await api('GET', '/api/diag/status');
+  const tool = (n, p) => `<span class="chip ${p ? 'ok' : ''}">${n} ${p ? esc(p) : 'not installed'}</span>`;
+  const cmds = [
+    ['Live SIP ladder in the terminal (sngrep)', `sngrep -d any port ${st.sipPort}`],
+    ['SIP + RTP to a file (tcpdump)', `tcpdump -i any -nn -s0 -w /tmp/sip.pcap port ${st.sipPort} or udp portrange ${st.rtpRange.start}-${st.rtpRange.end}`],
+    ['SIP messages as text (tcpdump)', `tcpdump -i any -nn -s0 -A port ${st.sipPort}`],
+    ['RTP stream stats from a file (tshark)', 'tshark -r /tmp/sip.pcap -q -z rtp,streams'],
+    ['SIP call list from a file (tshark)', 'tshark -r /tmp/sip.pcap -q -z sip,stat -z voip,calls'],
+    ['Asterisk: SIP messages in the console', 'asterisk -rx "pjsip set logger on"   # off: pjsip set logger off'],
+    ['Asterisk: RTP per channel', 'asterisk -rx "pjsip show channelstats"'],
+  ];
+  el.innerHTML = `<div class="grid two">
+    <div class="panel"><h2>Download a capture (tcpdump)</h2><form class="body" id="pf" style="display:flex;flex-direction:column;gap:10px">
+      <div class="row"><label>Seconds<select name="seconds"><option>10</option><option selected>30</option><option>60</option><option>120</option><option>300</option></select></label>
+        <label>Only IP<input name="host" class="mono" placeholder="carrier / customer IP"></label>
+        <label>Extra port<input name="port" class="mono" placeholder="e.g. 5080" inputmode="numeric"></label></div>
+      <div class="row" style="align-items:center"><label class="check"><input type="checkbox" name="sip" checked> SIP (port ${st.sipPort}/5060/5061)</label>
+        <label class="check"><input type="checkbox" name="rtp"> RTP (UDP ${st.rtpRange.start}-${st.rtpRange.end})</label></div>
+      <p class="hint">The download runs for the chosen time, then finishes. Open it in Wireshark: <b>Telephony → VoIP Calls</b> shows the call flow and lets you play the audio (needs RTP).</p>
+      <div><button class="btn primary">Start capture & download</button></div></form></div>
+    <div class="panel"><h2>Tools on this server</h2><div class="body"><div class="summary" style="padding:0 0 12px">${tool('tcpdump', st.tools.tcpdump)}${tool('tshark', st.tools.tshark)}${tool('sngrep', st.tools.sngrep)}</div>
+      ${!st.tools.sngrep || !st.tools.tshark ? `<p class="hint">Optional for SSH use: <code>apt install sngrep tshark</code>. This page does not need them.</p>` : ''}
+      <div class="cmds">${cmds.map(([t, c]) => `<div class="cmd"><div class="lab">${esc(t)}</div><div class="row" style="align-items:center"><code>${esc(c)}</code><button type="button" class="btn sm" data-copy="${esc(c)}">Copy</button></div></div>`).join('')}</div></div></div></div>`;
+  $$('[data-copy]').forEach((b) => (b.onclick = () => copy(b.dataset.copy)));
+  $('#pf').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const f = e.target, d = formData(f);
+    const qs = new URLSearchParams({ seconds: d.seconds, host: d.host || '', port: d.port || '', sip: f.sip.checked ? '1' : '0', rtp: f.rtp.checked ? '1' : '0' });
+    location.href = '/api/diag/pcap?' + qs;
+    toast(`Capturing for ${d.seconds}s — the file downloads when it finishes`);
+  });
+};
+
+// ---------------------------------------------------------------- Asterisk log
+const LOG_CLS = { ERROR: 'bad', WARNING: 'warn', NOTICE: 'info' };
+DiagTab.log = async (el, preset = '') => {
+  el.innerHTML = `<div class="panel"><form class="filters" id="lf">
+      <label style="max-width:340px">Contains<input name="q" class="mono" placeholder="number, IP, C-0000001a, trunk name…" value="${esc(preset)}"></label>
+      <label class="check" style="max-width:none"><input type="checkbox" name="ERROR" checked> ERROR</label>
+      <label class="check" style="max-width:none"><input type="checkbox" name="WARNING" checked> WARNING</label>
+      <label class="check" style="max-width:none"><input type="checkbox" name="NOTICE" checked> NOTICE</label>
+      <label class="check" style="max-width:none"><input type="checkbox" name="VERBOSE"> VERBOSE</label>
+      <label style="max-width:120px">Lines<select name="lines"><option>200</option><option selected>500</option><option>1000</option><option>2000</option></select></label>
+      <div class="actions"><button class="btn primary">Search</button></div></form>
+    <div class="summary" id="lSum"></div><div class="body" style="padding-top:0"><pre class="code logbox" id="lOut">Loading…</pre></div></div>`;
+  const f = $('#lf');
+  const load = async () => {
+    const levels = ['ERROR', 'WARNING', 'NOTICE', 'VERBOSE', 'DEBUG'].filter((l) => f[l] ? f[l].checked : false);
+    const r = await api('GET', '/api/diag/log?' + new URLSearchParams({ q: f.q.value.trim(), lines: f.lines.value, levels: levels.join(',') }));
+    $('#lSum').innerHTML = `<span class="chip mono">${esc(r.file)}</span><span class="chip">${fmtInt(r.lines.length)} lines</span><span class="chip">searched last ${fmtInt(Math.round(r.scannedBytes / 1024))} KB</span>`;
+    $('#lOut').innerHTML = r.lines.length ? r.lines.map((l) => {
+      const lv = (/\]\s+([A-Z]+)\[/.exec(l) || [])[1];
+      return `<span class="${LOG_CLS[lv] || ''}">${esc(l).replace(/\[(C-[0-9a-f]{8})\]/g, '[<a href="#" data-cid="$1">$1</a>]')}</span>`;
+    }).join('\n') : 'No matching lines.';
+    $('#lOut').scrollTop = $('#lOut').scrollHeight;
+    $$('#lOut [data-cid]').forEach((a) => (a.onclick = (e) => { e.preventDefault(); f.q.value = a.dataset.cid; f.VERBOSE.checked = true; load().catch((er) => toast(er.message, true)); }));
+  };
+  f.addEventListener('submit', (e) => { e.preventDefault(); load().catch((er) => toast(er.message, true)); });
+  await load();
+};
+
+// ---------------------------------------------------------------- call lookup
+DiagTab.lookup = async (el) => {
+  el.innerHTML = `<div class="panel" style="margin-bottom:14px"><form class="filters" id="cl" style="border-bottom:0">
+      <label style="max-width:300px">Number / DID / Call-ID<input name="q" class="mono" required placeholder="e.g. 9876543210"></label>
+      <label>From<input type="date" name="from" value="${daysAgo(1)}"></label><label>To<input type="date" name="to" value="${dayStr()}"></label>
+      <div class="actions"><button class="btn primary">Look up</button></div></form></div><div id="clOut"></div>`;
+  $('#cl').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const d = formData(e.target), num = d.q.replace(/[^0-9]/g, '');
+    $('#clOut').innerHTML = '<div class="panel"><div class="body">Searching…</div></div>';
+    const [calls, sip, log] = await Promise.all([
+      num.length >= 3 ? api('GET', '/api/reports/calls?' + new URLSearchParams({ from: d.from, to: d.to, number: num, size: 50 })).catch(() => null) : null,
+      api('GET', '/api/diag/sip/dialogs?' + new URLSearchParams({ q: d.q })).catch(() => null),
+      api('GET', '/api/diag/log?' + new URLSearchParams({ q: num.length >= 3 ? num : d.q, lines: 200, levels: 'ERROR,WARNING,NOTICE,VERBOSE' })).catch(() => null),
+    ]);
+    const rows = calls ? calls.rows : [];
+    $('#clOut').innerHTML = `<div class="panel" style="margin-bottom:14px"><h2>Calls (CDR) <span class="chip">${rows.length}${calls && calls.total > rows.length ? ' of ' + calls.total : ''}</span></h2>
+      <div class="tw"><table><thead><tr><th>Start</th><th>Process → trunk</th><th>Number</th><th>Disposition</th><th>Why / what to check</th><th class="r">Ring</th><th class="r">Talk</th><th>Hangup cause</th></tr></thead><tbody>
+      ${rows.length ? rows.map((c) => `<tr><td class="mono" style="font-size:12px;white-space:nowrap">${fmtTime(c.start_time)}</td>
+        <td>${esc(c.process_code || '')} → ${esc(c.trunk_name || '')}${c.direction === 'in' ? ' <span class="chip info">in</span>' : ''}</td>
+        <td class="mono">${esc(c.dialed || '')}${c.sent_number && c.sent_number !== c.dialed ? `<small> sent ${esc(c.sent_number)}</small>` : ''}</td>
+        <td>${dispChip(c.disposition)}</td><td style="font-size:12.5px;color:var(--ink-2);max-width:360px">${esc(DISP_HELP[c.disposition] || '')}${c.hdr_status && !['ok', 'none'].includes(c.hdr_status) ? ` Header: ${esc(HDR_TXT[c.hdr_status] || c.hdr_status)} (X-DID "${esc(c.hdr_did || '')}", X-Number "${esc(c.hdr_num || '')}").` : ''}</td>
+        <td class="r num">${c.ring_sec}s</td><td class="r num">${fmtDur(c.bill_sec)}</td>
+        <td class="mono" style="font-size:12px">${c.hangup_cause ? `${c.hangup_cause} ${esc(Q850[c.hangup_cause] || '')}` : ''}${c.dialstatus ? ` · ${esc(c.dialstatus)}` : ''}</td></tr>`).join('')
+        : `<tr><td colspan="8" class="empty">${num.length >= 3 ? 'No calls with this number in the date range.' : 'Enter at least 3 digits to search the CDR.'}</td></tr>`}</tbody></table></div></div>
+      <div class="panel" style="margin-bottom:14px"><h2>SIP dialogs in the trace buffer <span class="chip">${sip ? sip.dialogs.length : 0}</span></h2><div class="body">
+        ${sip && sip.dialogs.length ? sip.dialogs.slice(0, 30).map((g) => `<div class="cmd"><a href="#" data-flow="${esc(g.callId)}" class="mono">${esc(clock(g.start))} ${esc(g.method)} ${esc(g.from)} → ${esc(g.to)}</a> <span class="chip ${STATE_CLS[g.state] || ''}">${esc(g.state)}${g.code && g.state === 'REJECTED' ? ' ' + g.code : ''}</span></div>`).join('')
+        : `<p class="hint">Nothing captured for this. Start a SIP trace on the <a href="#/diag?tab=sip">SIP trace</a> tab, then have the call placed again.</p>`}</div></div>
+      <div class="panel"><h2>Asterisk log lines <span class="chip">${log ? log.lines.length : 0}</span></h2><div class="body"><pre class="code logbox">${log && log.lines.length ? log.lines.map((l) => esc(l)).join('\n') : 'No matching log lines.'}</pre></div></div>`;
+    $$('#clOut [data-flow]').forEach((a) => (a.onclick = (ev) => { ev.preventDefault(); Diag.tab = 'sip'; location.hash = '#/diag?tab=sip'; setTimeout(() => flow(a.dataset.flow), 400); }));
+  });
+};
+
 // =================================================================== SYSTEM
 PAGES.system = async (main) => {
   main.innerHTML = `<div class="head"><div><h1>System</h1><p>Health, generated Asterisk config, live Asterisk views and audit log.</p></div>
@@ -779,7 +1121,7 @@ PAGES.system = async (main) => {
     <div class="grid two" style="margin-bottom:14px">
       <div class="panel"><h2>Generated config</h2><div class="body"><div class="tabs" id="cfgTabs"></div><pre class="code" id="cfgCode">Loading…</pre></div></div>
       <div class="panel"><h2>Asterisk CLI (read-only)</h2><div class="body"><div class="tabs" id="cliTabs">
-        ${['endpoints', 'registrations', 'contacts', 'groups', 'channels'].map((x, i) => `<button data-cli="${x}" class="${i ? '' : 'on'}">${x}</button>`).join('')}</div><pre class="code" id="cliOut">…</pre></div></div>
+        ${['endpoints', 'registrations', 'contacts', 'groups', 'channels', 'channelstats', 'transports', 'qualify', 'rtp'].map((x, i) => `<button data-cli="${x}" class="${i ? '' : 'on'}">${x}</button>`).join('')}</div><pre class="code" id="cliOut">…</pre></div></div>
     </div>
     <div class="grid two">
       <div class="panel"><h2>Audit log</h2><div class="tw" style="max-height:380px;overflow:auto"><table><thead><tr><th>When</th><th>Admin</th><th>Action</th><th>Object</th></tr></thead><tbody id="audit"></tbody></table></div></div>

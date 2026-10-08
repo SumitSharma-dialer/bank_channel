@@ -35,6 +35,10 @@ const CMDS = {
   contacts: 'pjsip show contacts',
   groups: 'group show channels',
   channels: 'core show channels concise',
+  channelstats: 'pjsip show channelstats',
+  transports: 'pjsip show transports',
+  qualify: 'pjsip show aors',
+  rtp: 'rtp show settings',
 };
 router.get('/cli/:what', wrap(async (req, res) => {
   const cmd = CMDS[req.params.what];

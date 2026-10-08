@@ -108,10 +108,17 @@ Indexes: BRIN on `start_time`; `(process_code, start_time)`, `(trunk_name, start
 ### `daily_stats` — per-day counters, PK `(day, scope, ref)`
 `scope` = `process` | `trunk` | `did`; `ref` = process code / trunk name / DID.
 Counters: `total, answered, busy, no_answer, cancel, congestion, failed, channel_limit, trunk_limit, blocked, no_route,
-invalid, off_hours, no_header, invalid_did, talk_sec, peak_channels`. Updated on every call end; `peak_channels`
+invalid, off_hours, no_header, invalid_did, sip_down, talk_sec, peak_channels`. Updated on every call end; `peak_channels`
 copied from Redis every 15 s. Calls rejected before reaching the trunk are not counted on the trunk.
 
-### `dispositions` — lookup (code PK, label, source `trunk|distributor`, sip_code, sort). Re-seeded on every schema run.
+### `dispositions` — lookup (code PK, label, source `trunk|distributor`, sip_code, sort, custom_code)
+Seeded on every schema run; only `source` and `sort` are refreshed for existing rows, because `label`, `sip_code`
+(distributor rows: the SIP response sent to the customer) and `custom_code` (display code, `''` = the code) are edited
+on the Dispositions page. See [diagnostics.md](diagnostics.md#dispositions-page-custom-dispositions).
+
+### `diag_issues` — issue tracker
+`id, key, severity (critical|warning), title, detail, hint, opened_at, last_seen, closed_at`. Open while
+`closed_at IS NULL` (unique per `key` among open rows). Written by `src/diag/issues.js` every 30 s.
 
 ### `audit_log` — who changed what
 `id, at, admin, action (create/update/delete/limit/activate/deactivate/apply/login/password/…), entity, entity_id, details jsonb`.

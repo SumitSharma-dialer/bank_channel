@@ -61,7 +61,15 @@ Login is rate-limited to 10 failures per IP per 15 minutes.
 | `GET /api/system/health` | Asterisk version, ARI, DB, Redis, last apply result |
 | `POST /api/system/apply` | force re-render + reload |
 | `GET /api/system/config-preview` | rendered files |
-| `GET /api/system/cli/:what` | read-only `asterisk -rx`: `endpoints`, `registrations`, `contacts`, `groups`, `channels` |
+| `GET /api/system/cli/:what` | read-only `asterisk -rx`: `endpoints`, `registrations`, `contacts`, `groups`, `channels`, `channelstats`, `transports`, `qualify`, `rtp` |
+| `GET /api/dispositions`, `PUT /api/dispositions/:code` `{custom_code,label,sip_code}` | custom dispositions (re-applies the dialplan when `sip_code` changes) |
+| `GET /api/diag/status` | tools found (tcpdump/tshark/sngrep), trace state, RTP range |
+| `GET /api/diag/issues`, `POST /api/diag/issues/run` | open issues + history; run checks now |
+| `POST /api/diag/sip/start` `{minutes,host,keepNoise}`, `POST /api/diag/sip/stop`, `POST /api/diag/sip/clear` | live SIP trace |
+| `GET /api/diag/sip/dialogs?q&method`, `GET /api/diag/sip/dialog?id`, `GET /api/diag/sip/dialog.pcap?id` | trace results, one call flow, one call as pcap |
+| `GET /api/diag/pcap?seconds&host&port&sip&rtp` | streamed tcpdump download |
+| `POST /api/diag/rtp/capture` `{seconds,host}`, `GET /api/diag/rtp/channels` | RTP stream analysis; live per-channel RTP counters |
+| `GET /api/diag/log?q&levels&lines` | Asterisk log search |
 | `GET /api/system/audit?limit=` | audit log |
 | `POST /api/system/password` `{current,next}` | change own password (min 8 chars) |
 | `GET /internal/did-route?did&from` | **localhost only**, no login — used by inbound dialplan CURL |
@@ -83,7 +91,9 @@ Every create/update/delete writes `audit_log` and triggers an Asterisk apply; th
 | Calls not appearing in reports | `[sd-hangup]` UserEvent → ARI must be connected; `journalctl -u sipdist | grep saveCall` |
 | Customer call not identified (401/no endpoint) | source IP not in `allowed_ips`; `asterisk -rx 'pjsip show identifies'` |
 | Live counters look wrong | they self-heal every 10 s from ARI; Redis can be flushed safely (`sd:*` keys) |
-| Trunk "Unavailable" | qualify OPTIONS to the carrier fail; `pjsip set logger on` |
+| Trunk "Unavailable" / `SIP_DOWN` calls | qualify OPTIONS to the carrier fail; Diagnostics → SIP trace with "include OPTIONS" ticked, filtered on the carrier IP |
+| No audio / one-way audio | Diagnostics → RTP / audio: "no RTP received" on a channel, or a one-way stream in the capture; check NAT / `rtp_symmetric` / firewall on UDP 10000-20000 |
+| SIP trace says "Operation not permitted" | the unit is missing `AmbientCapabilities=CAP_NET_RAW` — see [diagnostics.md](diagnostics.md#permissions-tcpdump-needs-cap_net_raw) |
 | Deleting a trunk gives a server error | live FK is `ON DELETE RESTRICT` — move/delete its processes first |
 
 ## Backup

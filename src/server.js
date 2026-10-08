@@ -7,6 +7,7 @@ const cfg = require('./config');
 const { q, audit } = require('./db');
 const auth = require('./auth');
 const tracker = require('./tracker');
+const issues = require('./diag/issues');
 const { apply } = require('./asterisk/apply');
 const { wrap, str } = require('./routes/util');
 
@@ -47,6 +48,8 @@ app.use('/api/trunks', require('./routes/trunks'));
 app.use('/api/processes', require('./routes/processes'));
 app.use('/api/reports', require('./routes/reports'));
 app.use('/api/system', require('./routes/system'));
+app.use('/api/dispositions', require('./routes/dispositions'));
+app.use('/api/diag', require('./routes/diag'));
 app.get('/api/live', wrap(async (req, res) => res.json(await tracker.snapshot())));
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'not found' }));
@@ -73,13 +76,14 @@ const broadcast = (type, data) => {
 wss.on('connection', async (ws) => {
   try { ws.send(JSON.stringify({ type: 'snapshot', data: await tracker.snapshot() })); } catch { /* ignore */ }
 });
-tracker.bus.on('snapshot', (s) => { if (wss.clients.size) broadcast('snapshot', s); });
+tracker.bus.on('snapshot', (s) => { if (wss.clients.size) broadcast('snapshot', { ...s, issues: issues.summary() }); });
 tracker.bus.on('hit', (h) => broadcast('hit', h));
 tracker.bus.on('call', (c) => broadcast('call', c));
 
 (async () => {
   await auth.ensureAdmin();
   tracker.start();
+  issues.start();
   apply('startup');   // make Asterisk config match the DB on every boot
   server.listen(cfg.http.port, cfg.http.host, () =>
     console.log(`[http] SIP Channel Distributor UI on http://${cfg.http.host}:${cfg.http.port}`));

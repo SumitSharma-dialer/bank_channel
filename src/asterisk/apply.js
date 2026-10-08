@@ -22,15 +22,18 @@ async function loadRows() {
   const processes = (await q('SELECT * FROM processes ORDER BY code')).rows;
   const ranges = (await q('SELECT * FROM trunk_did_ranges ORDER BY trunk_id, first_did')).rows;
   for (const t of trunks) t.did_ranges = ranges.filter((r) => r.trunk_id === t.id);
-  return { trunks, processes };
+  // SIP response per distributor reject, edited on the Dispositions page
+  const rejectCodes = {};
+  for (const d of (await q(`SELECT code, sip_code FROM dispositions WHERE source='distributor'`)).rows) rejectCodes[d.code] = d.sip_code;
+  return { trunks, processes, rejectCodes };
 }
 
 async function renderAll() {
-  const { trunks, processes } = await loadRows();
+  const { trunks, processes, rejectCodes } = await loadRows();
   return {
     'trunks.conf': renderTrunks(trunks),
     'processes.conf': renderProcesses(processes),
-    'dialplan.conf': renderDialplan(processes, trunks, cfg.statsTz, `http://127.0.0.1:${cfg.http.port}/internal/did-route`),
+    'dialplan.conf': renderDialplan(processes, trunks, cfg.statsTz, `http://127.0.0.1:${cfg.http.port}/internal/did-route`, rejectCodes),
   };
 }
 

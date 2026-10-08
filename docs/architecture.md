@@ -139,8 +139,12 @@ Seeded into table `dispositions` by `db/schema.sql`:
 | OFF_HOURS | Outside working time | distributor | 480 |
 | NO_HEADER | X-DID / X-Number missing or bad | distributor | 484 |
 | INVALID_DID | X-DID not a caller-ID DID of the trunk | distributor | 403 |
+| SIP_DOWN | Trunk / far end unreachable (`CHANUNAVAIL`) | trunk | 503 |
 
-`DIALSTATUS` values are mapped in `tracker.js` (`ANSWER→ANSWERED`, `NOANSWER→NO_ANSWER`, `CHANUNAVAIL→FAILED`, …).
+Each code can have a custom display code (CHANNEL_LIMIT is shown as `LIMIT_REACH`), and the SIP response of each
+distributor reject can be changed on the Dispositions page — see [diagnostics.md](diagnostics.md#dispositions-page-custom-dispositions).
+
+`DIALSTATUS` values are mapped in `tracker.js` (`ANSWER→ANSWERED`, `NOANSWER→NO_ANSWER`, `CHANUNAVAIL→SIP_DOWN`, …).
 
 ## Live monitoring path
 
