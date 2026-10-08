@@ -943,7 +943,7 @@ DiagTab.reg = async (el) => {
 };
 
 // ---------------------------------------------------------------- SIP trace (sngrep-like)
-const STATE_CLS = { 'IN CALL': 'ok', COMPLETED: 'ok', RINGING: 'info', 'CALL SETUP': 'info', REJECTED: 'bad', CANCELLED: 'warn' };
+const STATE_CLS = { 'IN CALL': 'ok', COMPLETED: 'ok', RINGING: 'info', 'CALL SETUP': 'info', REJECTED: 'bad', CANCELLED: 'warn', 'NO REPLY': 'bad' };
 DiagTab.sip = async (el) => {
   el.innerHTML = `<div class="panel" style="margin-bottom:14px"><form class="filters" id="stf">
       ${targetField()}

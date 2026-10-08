@@ -88,7 +88,7 @@ class DialogStore {
       if (!msg.request) return null;   // response to a request we did not see (capture started mid-dialog)
       g = { callId: msg.callId, method: msg.method, start: pkt.ts, from: msg.from.user, to: msg.to.user,
         src: `${pkt.src}:${pkt.sport}`, dst: `${pkt.dst}:${pkt.dport}`, ua: msg.ua, xdid: msg.xdid, xnum: msg.xnum,
-        state: 'CALL SETUP', code: 0, reason: '', msgs: [], records: [], count: 0 };
+        state: msg.method === 'INVITE' ? 'CALL SETUP' : 'NO REPLY', code: 0,   // OPTIONS/REGISTER: until a final response reason: '', msgs: [], records: [], count: 0 };
       this.d.set(msg.callId, g);
       if (this.d.size > this.maxDialogs) this.d.delete(this.d.keys().next().value);
     }

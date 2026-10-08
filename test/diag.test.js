@@ -194,3 +194,12 @@ Objects found: 2
   assert.strictEqual(lastPacket(log, ['203.0.113.5'], []).callId, 'r9');
   assert.strictEqual(lastPacket(log, ['9.9.9.9'], ['nobody']), null);
 });
+
+test('non-INVITE dialog without a reply is NO REPLY, then COMPLETED on 200', () => {
+  const st = new DialogStore({ keepNoise: true });
+  const pk = { ts: 1, src: '172.20.10.201', sport: 5060, dst: '10.23.23.252', dport: 5060, proto: 'udp', record: Buffer.alloc(0) };
+  st.add(pk, parse(req('OPTIONS', 5).replace(CID, 'q1')));
+  assert.strictEqual(st.get('q1').state, 'NO REPLY');
+  st.add(pk, parse(resp(200, 'OK', 5, 'OPTIONS').replace(CID, 'q1')));
+  assert.strictEqual(st.get('q1').state, 'COMPLETED');
+});
