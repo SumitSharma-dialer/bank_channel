@@ -6,6 +6,7 @@ const cfg = require('./config');
 const redis = require('./redis');
 const ari = require('./ari');
 const { q } = require('./db');
+const { disposition } = require('./disposition');
 
 const bus = new EventEmitter();          // 'hit', 'call', 'snapshot'
 const CH_RE = /^PJSIP\/([pt])_([a-z0-9_]{2,32})-[0-9a-f]+$/;
@@ -92,11 +93,6 @@ async function reconcile() {
 }
 
 // ------------------------------------------------------------- call records
-// CHANUNAVAIL = the far end could not be reached at all (qualify says unreachable / no contact) -> SIP_DOWN
-const DIAL_MAP = { ANSWER: 'ANSWERED', BUSY: 'BUSY', NOANSWER: 'NO_ANSWER', CANCEL: 'CANCEL',
-  CONGESTION: 'CONGESTION', CHANUNAVAIL: 'SIP_DOWN', DONTCALL: 'FAILED', TORTURE: 'FAILED', INVALIDARGS: 'FAILED' };
-const OWN = new Set(['ANSWERED', 'BUSY', 'NO_ANSWER', 'CANCEL', 'CONGESTION', 'FAILED',
-  'CHANNEL_LIMIT', 'TRUNK_LIMIT', 'BLOCKED', 'NO_ROUTE', 'INVALID', 'OFF_HOURS', 'NO_HEADER', 'INVALID_DID', 'SIP_DOWN']);
 const COL = { ANSWERED: 'answered', BUSY: 'busy', NO_ANSWER: 'no_answer', CANCEL: 'cancel', CONGESTION: 'congestion',
   FAILED: 'failed', CHANNEL_LIMIT: 'channel_limit', TRUNK_LIMIT: 'trunk_limit', BLOCKED: 'blocked',
   NO_ROUTE: 'no_route', INVALID: 'invalid', OFF_HOURS: 'off_hours', NO_HEADER: 'no_header', INVALID_DID: 'invalid_did', SIP_DOWN: 'sip_down' };
@@ -104,14 +100,8 @@ const NOT_ON_TRUNK = new Set(['CHANNEL_LIMIT', 'BLOCKED', 'NO_ROUTE', 'INVALID',
 const HDR_STATUS = new Set(['none', 'ok', 'missing', 'bad_number', 'bad_did']);   // none = outbound call without headers
 const digits = (v, n) => (String(v || '').replace(/[^0-9]/g, '').slice(0, n) || null);
 
-function disposition(raw) {
-  const d = String(raw || '').toUpperCase();
-  if (OWN.has(d)) return d;
-  return DIAL_MAP[d] || 'FAILED';
-}
-
 async function saveCall(u) {
-  const disp = disposition(u.disp);
+  const disp = disposition(u.disp, u.cause);
   const end = +u.end || Math.floor(Date.now() / 1000);
   const start = +u.start || end;
   const bill = Math.max(0, parseInt(u.bill, 10) || 0);
