@@ -85,8 +85,9 @@ The same apply runs on every service start (`apply('startup')`), so Asterisk alw
 
 Generated context `[proc-<code>]` (see `renderDialplan` / `headerCheck` / `dialTail` in `src/asterisk/render.js`):
 
-1. Customer server sends INVITE to `172.20.10.201:5060`. PJSIP matches the source IP via `[p_<code>-identify]`
-   (`endpoint_identifier_order=ip,...`) → endpoint `p_<code>` → context `proc-<code>`.
+1. Customer server sends INVITE to `172.20.10.201:5060`. IP auth: PJSIP matches the source IP via `[p_<code>-identify]`
+   (`endpoint_identifier_order=ip,...`). Password auth: digest login via `[p_<code>-auth]` (`auth_username`), from any IP
+   or only the IP lock's IPs. → endpoint `p_<code>` → context `proc-<code>`. See [processes.md](processes.md).
 2. Process inactive or outbound disabled → `BLOCKED` (cause 21 → SIP 403). No active trunk → `NO_ROUTE` (34 → 503).
 3. Dialed number must equal the process **dummy number** (`processes.dummy_cli`); anything else → `INVALID` (1 → 404).
 4. Read headers `X-DID` and `X-Number`:

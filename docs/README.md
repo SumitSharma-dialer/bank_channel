@@ -10,13 +10,14 @@ host `172.20.10.201`, app in `/opt/sipdist`, Asterisk 22.5.2 (Debian package), P
 | [asterisk.md](asterisk.md) | Which Asterisk files exist, which ones the app writes, which ones setup.sh edited, the generated dialplan logic, reload flow |
 | [credentials-and-config.md](credentials-and-config.md) | Where every password / secret / setting is stored, which file reads it and what it must match |
 | [operations.md](operations.md) | Service management, capacity (how many calls) and tuning, logs, HTTP API, CLI tools, troubleshooting, backup |
+| [processes.md](processes.md) | Processes page: IP vs username + password authentication, every form field (IPs, SIP port, IP lock), the list columns, Connection online / offline and how it is checked, Peer config |
 | [diagnostics.md](diagnostics.md) | Diagnostics page (issue tracker, SIP trace, RTP, tcpdump, log search) and custom dispositions (LIMIT_REACH, SIP_DOWN, SIP response per reject) |
 | [known-issues.md](known-issues.md) | Problems found while writing these docs (config mismatches, dead code, schema drift) |
 
 ## One-paragraph summary
 
 Customer Asterisk servers ("**processes**") send calls over SIP to this box. Asterisk identifies each customer by its
-source IP, checks the SIP headers `X-DID` (caller ID) and `X-Number` (number to call), enforces per-process and
+source IP or by SIP username + password, checks the SIP headers `X-DID` (caller ID) and `X-Number` (number to call), enforces per-process and
 per-trunk channel limits and working hours, and sends the call out through a carrier SIP **trunk** with the DID as
 caller ID. Calls from the carrier to a DID are routed back to the right customer. Everything is configured from a web
 UI (Node.js, port 3000). The UI stores settings in PostgreSQL, renders three Asterisk config files into

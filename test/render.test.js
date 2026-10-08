@@ -152,3 +152,10 @@ test("contexts with a catch-all '_.' have an explicit h extension", () => {
   for (const ctx of dp.split(/\n(?=\[)/).filter((c) => c.includes('exten => _.,1')))
     assert.ok(ctx.includes('exten => h,1,Hangup()'), ctx.split('\n')[0]);
 });
+
+test('password peer config always registers (online status + inbound), IP peer config never', () => {
+  const pw = peerConfig(proc, '10.0.0.1', 5060, []);
+  assert.ok(pw.pjsip.includes('[sipdist-reg]\ntype=registration') && pw.chan_sip.includes('register => p_acme:secret123:acme@10.0.0.1:5060'));
+  const ip = peerConfig({ ...proc, auth_type: 'ip', allowed_ips: '1.2.3.4' }, '10.0.0.1', 5060, ['1240']);
+  assert.ok(!ip.pjsip.includes('type=registration') && !ip.chan_sip.includes('register =>'));
+});

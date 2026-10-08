@@ -393,8 +393,8 @@ type=identify
 endpoint=sipdist
 match=${ip}
 
-${!byIp && dids.length ? `
-; register so the distributor can send you inbound DID calls
+${!byIp ? `
+; register: the distributor then shows you online and can send you inbound DID calls / callbacks
 [sipdist-reg]
 type=registration
 outbound_auth=sipdist-auth
@@ -442,8 +442,8 @@ exten => _X.,1,SIPAddHeader(${hdr.did}: 1234)   ; <- the DID to show as caller I
  same => n,SIPAddHeader(${hdr.nn}: \${EXTEN})
  same => n,Dial(SIP/${dummy}@sipdist,60)
  same => n,Hangup()
-${!byIp && dids.length ? `
-; [general] section of sip.conf — needed to receive inbound DID calls
+${!byIp ? `
+; [general] section of sip.conf — register: you show online and receive inbound DID calls / callbacks
 register => p_${p.code}:${pass}:${user}@${ip}:${sipPort}
 ` : ''}`;
   return { pjsip: pj.replace(/\n{3,}/g, '\n\n'), chan_sip: chanSip };

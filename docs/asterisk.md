@@ -97,7 +97,9 @@ SD_DID, SD_DIDUSED, SD_DIDOK, SD_HST, SD_HDID, SD_HNUM, SD_CNUM, SD_DEST, SD_INP
 The UI (Processes → peer config, `GET /api/processes/:id/peer-config`) generates a ready PJSIP and chan_sip/ViciDial
 sample for the customer: an endpoint `sipdist` pointing at `PUBLIC_IP:SIP_PORT`, and a dialplan that dials the
 dummy number with headers `X-DID: <caller-ID DID>` and `X-Number: <customer number>`. Inbound calls arrive at the
-customer in context `from-sipdist` (number = caller, caller ID = DID).
+customer in context `from-sipdist` (number = caller, caller ID = DID). Password-auth processes also get a registration
+(`[sipdist-reg] type=registration`, chan_sip `register =>`), always — it makes them show online and receive inbound
+DID calls / callbacks. IP-auth processes get none.
 
 ## Useful Asterisk commands
 
