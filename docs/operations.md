@@ -120,6 +120,7 @@ few GB per day, so 5 days fits easily on `/` (78 GB free); watch **System → Se
 | `npm test` | unit tests for the config renderer (`test/render.test.js`) |
 | `npm run db:init` | apply `db/schema.sql` (idempotent) + create first admin |
 | `npm run render` | print the Asterisk files that would be generated (no write) |
+| `npm run originate -- <number> <did> [trunk]` (or `sd-originate …`) | one test call straight out of a trunk, formatted like a live call (last 10 digits + trunk `prefix` / `cli_prefix`); answered = echo test; prints progress until the call ends |
 
 ## Installing / upgrading
 
