@@ -37,6 +37,7 @@ const ari = {
   reloadModule: (name) => call('PUT', `/asterisk/modules/${encodeURIComponent(name)}`),
 
   connect() {
+    const EVENTS = ['ChannelCreated', 'ChannelDestroyed', 'ChannelUserevent'];
     const url = cfg.ari.url.replace(/^http/, 'ws') +
       `/ari/events?app=${encodeURIComponent(cfg.ari.app)}&subscribeAll=true`;
     let retry = 1000;
@@ -45,6 +46,11 @@ const ari = {
       ws.on('open', () => {
         retry = 1000; ari.connected = true;
         console.log('[ari] events connected');
+        // Only the event types src/tracker.js uses. subscribeAll alone sends every dialplan step / Set() of every
+        // channel (~35+ events per call); at ~1,500 calls the app could not keep up, the ARI queue passed 500 and
+        // Asterisk's global overload stopped PJSIP from answering any SIP (load test 2026-10-08).
+        ari.put(`/applications/${encodeURIComponent(cfg.ari.app)}/eventFilter`, { allowed: EVENTS.map((type) => ({ type })) })
+          .catch((e) => console.warn('[ari] event filter not set:', e.message));
         ari.events.emit('connected');
       });
       ws.on('message', (buf) => {
