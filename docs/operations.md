@@ -64,6 +64,7 @@ Login is rate-limited to 10 failures per IP per 15 minutes.
 | `GET /api/system/cli/:what` | read-only `asterisk -rx`: `endpoints`, `registrations`, `contacts`, `groups`, `channels`, `channelstats`, `transports`, `qualify`, `rtp` |
 | `GET /api/dispositions`, `PUT /api/dispositions/:code` `{custom_code,label,sip_code}` | custom dispositions (re-applies the dialplan when `sip_code` changes) |
 | `GET /api/diag/status` | tools found (tcpdump/tshark/sngrep), trace state, RTP range |
+| `GET /api/diag/alerts`, `POST /api/diag/alerts/test` `{channel: slack\|email}` | alert configuration (no secrets), recent alerts, send a test |
 | `GET /api/diag/registrations` | registration state per trunk / process (no passwords returned) |
 | `GET /api/diag/sip/messages?after&types&q` | live SIP messages since id `after` |
 | `GET /api/diag/issues`, `POST /api/diag/issues/run` | open issues + history; run checks now |

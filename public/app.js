@@ -886,6 +886,7 @@ function targetWire(f) {
 // ---------------------------------------------------------------- issues
 DiagTab.issues = async (el) => {
   el.innerHTML = `<div class="panel" style="margin-bottom:14px"><h2>Open issues <span><button class="btn sm" id="iRun">Run checks now</button></span></h2><div class="body" id="iOpen">Loading…</div></div>
+    <div class="panel" style="margin-bottom:14px"><h2>Alerts — Slack &amp; Gmail</h2><div class="body" id="aBox">Loading…</div></div>
     <div class="panel"><h2>Issue history</h2><div class="tw" style="max-height:440px;overflow:auto"><table><thead><tr><th>Severity</th><th>Issue</th><th>Detail</th><th>Opened</th><th>Closed</th><th class="r">Lasted</th></tr></thead><tbody id="iHist"></tbody></table></div></div>`;
   const draw = (r) => {
     $('#iOpen').innerHTML = r.open.length ? r.open.map((i) => `<div class="issue ${i.severity}">
@@ -897,7 +898,37 @@ DiagTab.issues = async (el) => {
       <td class="mono" style="font-size:12px;white-space:nowrap">${fmtTime(i.opened_at)}</td><td class="mono" style="font-size:12px;white-space:nowrap">${fmtTime(i.closed_at)}</td>
       <td class="r num">${durBetween(i.opened_at, i.closed_at)}</td></tr>`).join('') : `<tr><td colspan="6" class="empty">No closed issues yet.</td></tr>`;
   };
+  const alertsBox = async () => {
+    const a = await api('GET', '/api/diag/alerts');
+    const ch = (name, on, extra, missing) => `<div class="hbox"><div class="lab">${name}</div><div class="v"><span class="chip ${on ? 'ok' : ''}">${on ? 'ON' : 'NOT SET UP'}</span> ${extra}</div>
+      ${missing ? `<div class="hint" style="margin-top:4px">${missing}</div>` : ''}
+      <button class="btn sm" style="margin-top:8px" data-test="${name.toLowerCase().startsWith('slack') ? 'slack' : 'email'}" ${on ? '' : 'disabled'}>Send test</button></div>`;
+    $('#aBox').innerHTML = `<div class="health">
+        ${ch('Slack', a.slack.configured, '', a.slack.invalid ? 'ALERT_SLACK_WEBHOOK is not a https://hooks.slack.com/services/… URL' : a.slack.configured ? '' : 'Add ALERT_SLACK_WEBHOOK to .env')}
+        ${ch('Email (Gmail)', a.email.configured, a.email.configured ? `<small>${esc(a.email.from)} → ${esc(a.email.to.join(', '))}</small>` : '', a.email.configured ? '' : `Missing in .env: ${a.email.missing.join(', ')}`)}
+        <div class="hbox"><div class="lab">Rules</div><div class="v" style="font-weight:400;font-size:12.5px">Critical → Slack + email · Warnings → Slack${a.rules.warningsEmail ? ' + email' : ' only'}<br>
+          ${a.rules.resolved ? 'Resolved messages on' : 'No resolved messages'} · ${a.rules.remindMin ? `reminder every ${a.rules.remindMin} min while critical` : 'no reminders'}</div></div></div>
+      ${!a.slack.configured || !a.email.configured ? `<details class="setup" style="margin-top:12px"><summary>How to set up</summary>
+        <p class="hint">Add these lines to <code>/opt/sipdist/.env</code> on the server, then <code>systemctl restart sipdist</code>. Secrets stay on the server; this page never shows them.</p>
+        <pre class="code">ALERT_SLACK_WEBHOOK=https://hooks.slack.com/services/XXX/YYY/ZZZ   # Slack → Apps → Incoming Webhooks → channel
+ALERT_GMAIL_USER=alerts.yourcompany@gmail.com
+ALERT_GMAIL_APP_PASSWORD=abcd efgh ijkl mnop   # myaccount.google.com/apppasswords (needs 2-Step Verification)
+ALERT_EMAIL_TO=noc@yourcompany.com,ops@yourcompany.com
+# optional: ALERT_WARNINGS_EMAIL=1  ALERT_REMIND_MIN=30  ALERT_RESOLVED=1  ALERT_NAME="SIPDist Mumbai"</pre></details>` : ''}
+      <h3 class="sub">Recently sent</h3>
+      <div class="tw" style="max-height:240px;overflow:auto"><table><thead><tr><th>When</th><th>Channel</th><th>Type</th><th>Message</th><th>Result</th></tr></thead><tbody>
+      ${a.recent.length ? a.recent.map((r) => `<tr><td class="mono" style="font-size:12px;white-space:nowrap">${fmtTime(r.at)}</td><td>${esc(r.channel)}</td><td>${esc(r.kind)}</td>
+        <td style="font-size:12.5px">${esc(r.subject || '')}</td><td>${r.ok ? '<span class="chip ok">sent</span>' : `<span class="chip bad" title="${esc(r.error || '')}">failed</span> <small>${esc((r.error || '').slice(0, 80))}</small>`}</td></tr>`).join('')
+        : '<tr><td colspan="5" class="empty" style="padding:14px">Nothing sent yet.</td></tr>'}</tbody></table></div>`;
+    $$('#aBox [data-test]').forEach((b) => (b.onclick = async () => {
+      b.disabled = true;
+      try { await api('POST', '/api/diag/alerts/test', { channel: b.dataset.test }); toast(`Test ${b.dataset.test} alert sent`); }
+      catch (e) { toast(e.message, true); }
+      finally { b.disabled = false; alertsBox().catch(() => {}); }
+    }));
+  };
   const load = async () => draw(await api('GET', '/api/diag/issues'));
+  alertsBox().catch((e) => ($('#aBox').textContent = e.message));
   $('#iRun').onclick = async () => { $('#iRun').disabled = true; try { draw(await api('POST', '/api/diag/issues/run')); toast('Checks done'); } finally { $('#iRun').disabled = false; } };
   await load(); diagPoll(load, 15000);
 };

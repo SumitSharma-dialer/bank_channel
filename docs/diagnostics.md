@@ -78,3 +78,25 @@ treat "limit reached" as busy and retry later.
 New disposition. `Dial()` returning `CHANUNAVAIL` (the trunk — or, for inbound calls, the customer server — cannot be
 reached: qualify says unreachable / no contact) is now stored as `SIP_DOWN` instead of `FAILED`, counted in
 `daily_stats.sip_down` and shown in its own "SIP down" column on the Daily statistics page.
+
+## Alerts (Slack & Gmail)
+
+The issue tracker sends one grouped message per check run when issues **open**, **resolve**, or are still open
+(**reminder**). Configured only in `/opt/sipdist/.env` (restart `sipdist` after a change); the UI (Diagnostics →
+Issues → Alerts) shows whether each channel is on, has **Send test** buttons and the last 30 sent alerts
+(table `alert_log`). Secrets are never sent to the browser or written to the log.
+
+| Variable | Meaning |
+|---|---|
+| `ALERT_SLACK_WEBHOOK` | Slack incoming webhook URL (`https://hooks.slack.com/services/…`) |
+| `ALERT_GMAIL_USER` | Gmail address that sends the emails |
+| `ALERT_GMAIL_APP_PASSWORD` | Google App Password (myaccount.google.com/apppasswords, needs 2-Step Verification) — not the normal password |
+| `ALERT_EMAIL_TO` | recipients, comma-separated |
+| `ALERT_WARNINGS_EMAIL` | `1` = warnings by email too (default: critical by email, warnings Slack only) |
+| `ALERT_REMIND_MIN` | reminder interval for critical issues still open, default `30`, `0` = off |
+| `ALERT_RESOLVED` | `0` = no "resolved" messages |
+| `ALERT_NAME` | server name in messages (default `SIPDist <PUBLIC_IP>`) |
+
+Email goes through `smtp.gmail.com:465` (TLS) with nodemailer; Slack through HTTPS. Issues already open when the
+service starts are not re-announced. Delivery errors are logged in `alert_log` and the journal (`[alert]`), never
+retried in a loop.

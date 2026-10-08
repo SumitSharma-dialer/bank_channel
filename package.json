@@ -5,7 +5,9 @@
   "main": "src/server.js",
   "type": "commonjs",
   "private": true,
-  "engines": { "node": ">=20.6" },
+  "engines": {
+    "node": ">=20.6"
+  },
   "scripts": {
     "start": "node --env-file=.env src/server.js",
     "dev": "node --env-file=.env --watch src/server.js",
@@ -16,6 +18,7 @@
   "dependencies": {
     "express": "^4.21.2",
     "ioredis": "^5.4.2",
+    "nodemailer": "6.9.16",
     "pg": "^8.13.1",
     "ws": "^8.18.0"
   }

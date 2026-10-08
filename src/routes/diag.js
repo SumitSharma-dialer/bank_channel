@@ -61,6 +61,15 @@ router.get('/status', wrap(async (req, res) => {
 router.get('/issues', wrap(async (req, res) => res.json(await issues.list(int(req.query.limit, { min: 10, max: 1000, def: 200 })))));
 router.post('/issues/run', wrap(async (req, res) => { await issues.run(); res.json(await issues.list()); }));
 
+// ------------------------------------------------------------------ alerts (Slack / Gmail)
+const alerts = require('../diag/alerts');
+router.get('/alerts', wrap(async (req, res) => res.json({ ...alerts.status(), recent: await alerts.recent() })));
+router.post('/alerts/test', wrap(async (req, res) => {
+  await alerts.test(String(req.body.channel || ''));
+  await audit(req.user, 'alert_test', 'diag', null, { channel: req.body.channel });
+  res.json({ ok: true });
+}));
+
 // ------------------------------------------------------------------ registrations
 router.get('/registrations', wrap(async (req, res) => res.json(await require('../diag/reg').collect(cap.trace.log))));
 

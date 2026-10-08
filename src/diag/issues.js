@@ -6,11 +6,13 @@ const redis = require('../redis');
 const ari = require('../ari');
 const applier = require('../asterisk/apply');
 const tracker = require('../tracker');
+const alerts = require('./alerts');
 
 const WINDOW_MIN = 15;   // call-based checks look at the last 15 minutes
 let open = new Map();     // key -> row
 let lastRun = null;
 let loaded = false;
+const alertedAt = new Map();   // key -> last alert time (opened / reminder), for reminders
 
 // -> [{ key, severity: 'critical'|'warning', title, detail, hint }]
 async function checks() {
@@ -83,6 +85,7 @@ async function checks() {
 async function load() {
   const { rows } = await q('SELECT * FROM diag_issues WHERE closed_at IS NULL');
   open = new Map(rows.map((r) => [r.key, r]));
+  for (const k of open.keys()) alertedAt.set(k, Date.now());   // already open before this start: no new alert
   loaded = true;
 }
 
@@ -90,6 +93,7 @@ async function run() {
   if (!loaded) await load();
   const now = await checks();
   const seen = new Set();
+  const events = [];   // -> one grouped Slack / email message
   for (const c of now) {
     seen.add(c.key);
     const cur = open.get(c.key);
@@ -97,20 +101,32 @@ async function run() {
       if (cur.detail !== c.detail || cur.severity !== c.severity) {
         const { rows } = await q('UPDATE diag_issues SET detail=$2, severity=$3, last_seen=now() WHERE id=$1 RETURNING *', [cur.id, c.detail, c.severity]);
         open.set(c.key, rows[0]);
+        if (cur.severity !== 'critical' && c.severity === 'critical') { events.push({ kind: 'opened', issue: rows[0] }); alertedAt.set(c.key, Date.now()); }
       } else await q('UPDATE diag_issues SET last_seen=now() WHERE id=$1', [cur.id]);
       continue;
     }
     const { rows } = await q(`INSERT INTO diag_issues(key,severity,title,detail,hint) VALUES($1,$2,$3,$4,$5) RETURNING *`,
       [c.key, c.severity, c.title, c.detail, c.hint]);
     open.set(c.key, rows[0]);
+    events.push({ kind: 'opened', issue: rows[0] }); alertedAt.set(c.key, Date.now());
     console.warn(`[issue] OPEN ${c.severity} ${c.title}: ${c.detail}`);
   }
   for (const [key, r] of open) {
     if (seen.has(key)) continue;
     await q('UPDATE diag_issues SET closed_at=now() WHERE id=$1', [r.id]);
-    open.delete(key);
+    open.delete(key); alertedAt.delete(key);
+    events.push({ kind: 'closed', issue: { ...r, closed_at: new Date() } });
     console.log(`[issue] CLOSED ${r.title}`);
   }
+  // reminders: critical issues still open, every ALERT_REMIND_MIN minutes
+  const every = alerts.conf.remindMin * 60e3;
+  if (every) {
+    for (const [key, r] of open) {
+      if (r.severity !== 'critical' || Date.now() - (alertedAt.get(key) || 0) < every) continue;
+      events.push({ kind: 'reminder', issue: r }); alertedAt.set(key, Date.now());
+    }
+  }
+  if (events.length) alerts.notify(events).catch((e) => console.error('[alert]', e.message));
   lastRun = Date.now();
 }
 

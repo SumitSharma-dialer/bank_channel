@@ -324,3 +324,6 @@ td small, .mono small { color: var(--ink-3); font-family: var(--sans); }
 .logline.bad { color: var(--bad); } .logline.warn { color: var(--warn); } .logline.info { color: var(--info); }
 .lmhidden { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 8px 16px; background: var(--warn-soft); color: var(--warn); font-size: 13px; border-bottom: 1px solid var(--line); }
 .lmhidden.hidden { display: none; }
+h3.sub { font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: var(--ink-3); margin: 16px 0 8px; }
+details.setup summary { cursor: pointer; font-weight: 500; color: var(--ink-2); }
+details.setup pre { margin-top: 8px; white-space: pre-wrap; }

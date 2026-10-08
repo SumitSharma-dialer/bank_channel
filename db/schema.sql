@@ -457,6 +457,18 @@ CREATE TABLE IF NOT EXISTS diag_issues (
 CREATE INDEX IF NOT EXISTS diag_issues_opened_idx ON diag_issues(opened_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS diag_issues_open_uidx ON diag_issues(key) WHERE closed_at IS NULL;
 
+-- Slack / email alerts sent by src/diag/alerts.js (issue opened / resolved / reminder / test)
+CREATE TABLE IF NOT EXISTS alert_log (
+  id       BIGSERIAL PRIMARY KEY,
+  at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  channel  VARCHAR(8) NOT NULL,        -- slack | email
+  kind     VARCHAR(40) NOT NULL,       -- opened / closed / reminder (combined with +) / test
+  subject  TEXT,
+  ok       BOOLEAN NOT NULL,
+  error    TEXT
+);
+CREATE INDEX IF NOT EXISTS alert_log_at_idx ON alert_log(at DESC);
+
 -- label, sip_code and custom_code are editable in the UI (Dispositions page): only set them for new rows
 INSERT INTO dispositions(code,label,source,sip_code,sort,custom_code) VALUES
   ('ANSWERED',      'Answered',                       'trunk',       200, 1, ''),
