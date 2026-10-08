@@ -36,6 +36,7 @@ async function parse(b, id) {
     sip_username: null,
     sip_password: null,
     allowed_ips: '',
+    sip_port: b.sip_port === undefined || b.sip_port === '' ? 5060 : int(b.sip_port, { min: 1, max: 65535 }),
     cli_mode: 'dummy',   // dummy_cli = the number the client dials; caller ID always comes from X-DID
     dummy_cli: str(b.dummy_cli, 32).replace(/[^0-9+]/g, ''),
     codecs: codecs(b.codecs),
@@ -237,8 +238,8 @@ router.put('/:id', wrap(async (req, res) => {
   const id = int(req.params.id, { min: 1 });
   const cur = (await q('SELECT * FROM processes WHERE id=$1', [id])).rows[0];
   if (!cur) return res.status(404).json({ error: 'not found' });
-  // codecs / notes are no longer in the form: not sent = keep current
-  const p = await parse({ codecs: cur.codecs, notes: cur.notes, ...req.body, sip_password: req.body.sip_password || cur.sip_password }, id);
+  // codecs / notes are no longer in the form, sip_port only for IP auth: not sent = keep current
+  const p = await parse({ codecs: cur.codecs, notes: cur.notes, sip_port: cur.sip_port, ...req.body, sip_password: req.body.sip_password || cur.sip_password }, id);
   const dids = parseDids(req.body.dids, p);
   await saveProcess(id, p, dids);
   res.json({ apply: await changed(req, 'update', id, { code: p.code, limit: p.channel_limit, was: cur.channel_limit, ...(dids ? { dids: dids.map((d) => didAt(d.len, d.lo, d.hi)) } : {}) }) });

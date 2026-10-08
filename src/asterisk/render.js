@@ -109,7 +109,8 @@ function renderProcesses(processes) {
     out += `;; ---- process ${p.code} — ${clean(p.name)} (limit ${p.channel_limit} ch)${p.active ? '' : ' [INACTIVE]'}\n`;
     // AOR = where inbound DID calls are sent: the customer's first fixed IP, or its registration
     const fixedIp = byIp ? ips(p.allowed_ips).find((i) => !i.includes('/')) : null;
-    if (byIp && fixedIp) out += `[${id}]\ntype=aor\ncontact=sip:${fixedIp}:5060\n\n`;
+    const port = +p.sip_port || 5060;   // customer server's SIP port (IP auth)
+    if (byIp && fixedIp) out += `[${id}]\ntype=aor\ncontact=sip:${fixedIp}:${port}\n\n`;
     // Reachability check for IP customers: Asterisk sends OPTIONS every 60 s to each fixed IP and `pjsip show contacts`
     // says Avail / Unavail. Kept on a separate monitor-only AOR + endpoint, because Asterisk skips Unavail contacts when
     // dialing — a customer that ignores OPTIONS must still get its inbound calls through [p_<code>]. Asterisk only
@@ -117,7 +118,7 @@ function renderProcesses(processes) {
     // and has no dialplan context, so no request can ever land on it.
     const fixed = byIp ? ips(p.allowed_ips).filter((i) => !i.includes('/')) : [];
     if (fixed.length && p.active) {
-      out += `[${id}-mon]\ntype=aor\n` + fixed.map((i) => `contact=sip:${i}:5060\n`).join('') + `qualify_frequency=60\nqualify_timeout=3\n\n` +
+      out += `[${id}-mon]\ntype=aor\n` + fixed.map((i) => `contact=sip:${i}:${port}\n`).join('') + `qualify_frequency=60\nqualify_timeout=3\n\n` +
         `[${id}-mon]\ntype=endpoint\n${tp('udp')}context=sd-none\naors=${id}-mon\nidentify_by=ip\ndisallow=all\nallow=ulaw\n\n`;
     }
     else if (!byIp) out += `[${id}]\ntype=aor\nmax_contacts=1\nremove_existing=yes\n\n`;

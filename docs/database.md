@@ -59,6 +59,7 @@ daily_stats (day, scope, ref)     ref = process code | trunk name | DID
 | auth_type | varchar(10) | password | `ip` (identified by `allowed_ips`) or `password` (identified by `sip_username`, customer registers). Chosen per process in the UI; the API defaults to `ip` when not sent |
 | sip_username, sip_password | varchar | | only for `password` auth (plain text). Username: 2–64 chars `A-Za-z0-9_.-`, defaults to `code`, unique. Password: 8–128 printable chars, no spaces or `; # [ ]`. `NULL` for `ip` auth |
 | allowed_ips | text | '' | comma separated IPs/CIDRs. `ip` auth (required): → `[p_<code>-identify] match=`; first fixed IP = inbound destination; each IP belongs to one process. `password` auth (optional): → `deny=0.0.0.0/0.0.0.0` + `permit=` on the endpoint, so the username works only from these IPs; blank = any IP |
+| sip_port | int | 5060 | `ip` auth: SIP port of the customer server (1–65535). Used for `[p_<code>]` AOR `contact=sip:<first fixed IP>:<sip_port>` (inbound DID calls) and the `[p_<code>-mon]` OPTIONS ping. Not used by `password` auth (the registration carries the port). Kept on edit when not sent |
 | cli_mode | varchar(12) | dummy | `dummy` / `passthrough` / `trunk_did`; API saves `dummy` (caller ID always from `X-DID`) |
 | dummy_cli | varchar(32) | '' | the "dummy number" the customer must dial (4–20 digits) |
 | codecs | varchar(128) | ulaw,alaw | |

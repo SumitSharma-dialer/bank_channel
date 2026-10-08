@@ -42,6 +42,12 @@ test('active ip process gets a monitor-only AOR + endpoint that pings fixed IPs 
   assert.ok(!renderProcesses([proc]).includes('-mon]'), 'password process: none');
 });
 
+test('ip process: inbound AOR and OPTIONS ping use the customer SIP port', () => {
+  const p = renderProcesses([{ ...proc, auth_type: 'ip', allowed_ips: '1.2.3.4', sip_port: 5080 }]);
+  assert.ok(p.includes('[p_acme]\ntype=aor\ncontact=sip:1.2.3.4:5080\n') && p.includes('[p_acme-mon]\ntype=aor\ncontact=sip:1.2.3.4:5080\n'));
+  assert.ok(renderProcesses([{ ...proc, auth_type: 'ip', allowed_ips: '1.2.3.4' }]).includes('contact=sip:1.2.3.4:5060\n'), 'default 5060');
+});
+
 test('ip process renders identify with every IP', () => {
   const p = renderProcesses([{ ...proc, auth_type: 'ip', allowed_ips: '1.2.3.4,5.6.7.0/24' }]);
   assert.ok(p.includes('match=1.2.3.4') && p.includes('match=5.6.7.0/24') && !p.includes('-auth]'));

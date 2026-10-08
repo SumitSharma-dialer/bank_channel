@@ -410,6 +410,8 @@ ALTER TABLE processes ADD COLUMN IF NOT EXISTS allow_outbound BOOLEAN NOT NULL D
 ALTER TABLE processes ADD COLUMN IF NOT EXISTS allow_inbound  BOOLEAN NOT NULL DEFAULT TRUE;
 ALTER TABLE processes ADD COLUMN IF NOT EXISTS out_hours      JSONB;
 ALTER TABLE processes ADD COLUMN IF NOT EXISTS in_hours       JSONB;
+-- SIP port of the customer server (IP auth): inbound DID calls and the OPTIONS ping go to <first fixed IP>:<sip_port>
+ALTER TABLE processes ADD COLUMN IF NOT EXISTS sip_port       INT NOT NULL DEFAULT 5060 CHECK (sip_port BETWEEN 1 AND 65535);
 ALTER TABLE daily_stats ADD COLUMN IF NOT EXISTS off_hours    INT NOT NULL DEFAULT 0;
 -- header dialing: the client calls the process's dummy number and sends the caller-ID DID and the
 -- customer number in SIP headers (names per process). '' = feature off.

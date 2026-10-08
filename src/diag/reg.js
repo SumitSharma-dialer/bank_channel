@@ -118,12 +118,12 @@ async function collect(traceLog) {
 }
 
 // `pjsip show contacts` lines of the monitor-only AORs of IP processes (render.js [p_<code>-mon]):
-// "  Contact:  p_acme-mon/sip:1.2.3.4:5060   ef5ebf5494 Avail   12.345"  -> { acme: [{ ip, status: 'Avail', rtt: 12.3 }] }
+// "  Contact:  p_acme-mon/sip:1.2.3.4:5060   ef5ebf5494 Avail   12.345"  -> { acme: [{ ip, port, status: 'Avail', rtt: 12.3 }] }
 function parseMonContacts(out) {
   const r = {};
   for (const line of String(out || '').split('\n')) {
-    const m = /^\s*Contact:\s+p_([a-z0-9_]+)-mon\/sips?:(?:[^@\s]*@)?([0-9.]+)(?::\d+)?\S*\s+\S+\s+(\w+)\s+(\S+)/.exec(line);
-    if (m) (r[m[1]] = r[m[1]] || []).push({ ip: m[2], status: m[3], rtt: Number.isFinite(+m[4]) ? Math.round(+m[4] * 10) / 10 : null });
+    const m = /^\s*Contact:\s+p_([a-z0-9_]+)-mon\/sips?:(?:[^@\s]*@)?([0-9.]+)(?::(\d+))?\S*\s+\S+\s+(\w+)\s+(\S+)/.exec(line);
+    if (m) (r[m[1]] = r[m[1]] || []).push({ ip: m[2], port: +(m[3] || 5060), status: m[4], rtt: Number.isFinite(+m[5]) ? Math.round(+m[5] * 10) / 10 : null });
   }
   return r;
 }

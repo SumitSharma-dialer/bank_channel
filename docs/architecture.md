@@ -5,7 +5,7 @@
 | Component | Runs as | Listens on | Purpose |
 |---|---|---|---|
 | `sipdist.service` (Node.js, `src/server.js`) | user `asterisk` | `0.0.0.0:3000` (HTTP + WebSocket `/ws`) | Web UI, REST API, config renderer, ARI event tracker |
-| Asterisk 22.5.2 | user `asterisk` | `0.0.0.0:5060` UDP+TCP (SIP), RTP UDP `10000-20000`, `127.0.0.1:8088` (HTTP/ARI) | Call handling (PJSIP) |
+| Asterisk 22.5.2 | user `asterisk` | `0.0.0.0:5060` UDP+TCP (SIP), RTP UDP `10000-30000`, `127.0.0.1:8088` (HTTP/ARI) | Call handling (PJSIP) |
 | PostgreSQL 18 | `postgres` | `127.0.0.1:5432` | Config (trunks, processes, DIDs), call records, daily stats, audit log |
 | Redis | `redis` | `127.0.0.1:6379`, `[::1]:6379` (password protected) | Live channel counters, peaks, hit counters |
 
@@ -116,7 +116,7 @@ the trunk uses `[sd-from-trunk]` which rejects everything.
    3. else `NO_ROUTE`.
 4. Process inactive / inbound disabled → `BLOCKED`; no fixed IP → `NO_ROUTE`; inbound hours (`in_hours`) → `OFF_HOURS`;
    then the same group-count limits.
-5. `Dial(PJSIP/<caller number>@p_<code>)` to the customer's first fixed IP (`[p_<code>]` AOR `contact=sip:<ip>:5060`),
+5. `Dial(PJSIP/<caller number>@p_<code>)` to the customer's first fixed IP (`[p_<code>]` AOR `contact=sip:<ip>:<sip_port>`, default 5060),
    caller ID = DID, plus headers `X-DID` / `X-Number` added by `[sd-inhdr]`.
 
 ## Dispositions

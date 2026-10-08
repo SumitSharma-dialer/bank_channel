@@ -61,7 +61,7 @@ Trunks: `context=sd-in-<name>` if inbound allowed and DID ranges exist, else `sd
 `qualify_frequency=60`. Registration: retry 30 s, forbidden/fatal retry 300 s, expiration 3600, `line=yes`.
 
 Processes: `context=proc-<code>`, `identify_by=ip`, `trust_id_inbound=yes`, `allow_subscribe=no`, AOR
-`contact=sip:<first fixed IP>:5060` (used for inbound calls to the customer).
+`contact=sip:<first fixed IP>:<sip_port>` (used for inbound calls to the customer; `sip_port` per process, default 5060).
 
 Optional env `PJSIP_TRANSPORT_UDP` / `PJSIP_TRANSPORT_TCP` adds `transport=<name>` lines; not set live (PJSIP picks the
 matching transport).

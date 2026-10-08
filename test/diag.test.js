@@ -207,8 +207,8 @@ test('non-INVITE dialog without a reply is NO REPLY, then COMPLETED on 200', () 
 test('parseMonContacts reads the OPTIONS ping status of IP processes', () => {
   const { parseMonContacts } = require('../src/diag/reg');
   const out = `  Contact:  p_acme-mon/sip:1.2.3.4:5060                   ef5ebf5494 Avail        12.345
-  Contact:  p_acme-mon/sip:5.6.7.8:5060                   aa5ebf5494 Unavail        -nan
+  Contact:  p_acme-mon/sip:5.6.7.8:5080                   aa5ebf5494 Unavail        -nan
   Contact:  p_acme/sip:1.2.3.4:5060                       ef5ebf5494 NonQual        -nan
   Contact:  t_x/sip:9.9.9.9:5060                          825470dd3a Avail       3.1`;
-  assert.deepStrictEqual(parseMonContacts(out), { acme: [{ ip: '1.2.3.4', status: 'Avail', rtt: 12.3 }, { ip: '5.6.7.8', status: 'Unavail', rtt: null }] });
+  assert.deepStrictEqual(parseMonContacts(out), { acme: [{ ip: '1.2.3.4', port: 5060, status: 'Avail', rtt: 12.3 }, { ip: '5.6.7.8', port: 5080, status: 'Unavail', rtt: null }] });
 });
