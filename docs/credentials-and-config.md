@@ -48,7 +48,7 @@ Loaded by Node with `--env-file=/opt/sipdist/.env` (see `deploy/sipdist.service`
 | `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASS` | `127.0.0.1` / `5432` / `channel_bank` / `channel_bank` / empty | PostgreSQL | yes |
 | `REDIS_URL` or `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASS` | `127.0.0.1:6379` db 0 | Redis | yes (host/port/pass) |
 | `RETENTION_DAYS` | `5` | DB history kept: older `calls`, `cdr`, `audit_log`, closed `diag_issues`, `alert_log` rows are deleted every 6 h (`src/retention.js`); `daily_stats` is kept | no (default) |
-| `ASTERISK_LOG` | `/var/log/asterisk/full` | Asterisk CLI log for Diagnostics → Asterisk log, System → Asterisk CLI log, Registrations | no (default) |
+| `ASTERISK_LOG` | `/var/log/asterisk/full` | Asterisk CLI log for Diagnostics → Asterisk log (live follow + search), Registrations | no (default) |
 | `STATS_TZ` | `Asia/Kolkata` | day boundaries, working-hours checks, reports | no (default) |
 | `PJSIP_TRANSPORT_UDP` / `PJSIP_TRANSPORT_TCP` | empty | adds `transport=` lines (read in `render.js`) | no |
 

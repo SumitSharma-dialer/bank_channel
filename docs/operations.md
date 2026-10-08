@@ -93,7 +93,7 @@ Asterisk `full` and `messages.log` are kept **3 days**, everything else **5 days
 | Asterisk warnings / errors | `/var/log/asterisk/messages.log` | 3 days | same logrotate rule (`queue_log` and other `*_log`: 5 days) |
 | App log (`[http]`, `[ari]`, `[apply]`, `[retention]` …) and the rest of the system journal | journald (`journalctl -u sipdist`) | 5 days | `/etc/systemd/journald.conf.d/sipdist-retention.conf` ← `deploy/journald-retention.conf`: `MaxRetentionSec=5day` |
 | Call history | `calls`, `cdr` | 5 days | `src/retention.js`, 1 min after start then every 6 h, batches of 5000 rows; `RETENTION_DAYS` in `.env` changes it |
-| CPU / RAM / storage history (System → Resource history graphs) | `sys_metrics` | 5 days | `src/sysinfo.js`: one row per minute, rows older than 5 days deleted every hour (not `RETENTION_DAYS`) |
+| CPU / RAM / storage history (System → graph icon on each Server resources tile) | `sys_metrics` | 5 days | `src/sysinfo.js`: one row per minute, rows older than 5 days deleted every hour (not `RETENTION_DAYS`) |
 | Audit log, Diagnostics issues (closed), alert log | `audit_log`, `diag_issues` (`closed_at`), `alert_log` | 5 days | same job; open issues are kept however old |
 | Reports | `daily_stats` | **kept** (not deleted) | one row per process / trunk / DID per day — Reports still show older days |
 
@@ -104,9 +104,9 @@ Effects of 5 days of `calls`:
 - Inbound DID routing to "the process that last called this caller" only knows the last 5 days; older callbacks go to
   the DID's assigned process.
 
-Where to read the CLI log: **System → Asterisk CLI log** (live, follows every 3 s, filter by text) and
-**Diagnostics → Asterisk log** (search the last 32 MB by text / level, click a `[C-xxxxxxxx]` call id for all its
-lines). Shell: `tail -f /var/log/asterisk/full`, older days `zgrep <text> /var/log/asterisk/full.*.gz`.
+Where to read the CLI log: **Diagnostics → Asterisk log** — "Follow live" (on by default) refreshes every 3 s and
+stays put while you scroll up; untick it to search the last 32 MB by text / level; click a `[C-xxxxxxxx]` call id for
+all its lines. Shell: `tail -f /var/log/asterisk/full`, older days `zgrep <text> /var/log/asterisk/full.*.gz`.
 
 Disk: verbose logging writes roughly 1–2 KB per call. At the planned ~2,000 concurrent calls of a dialer that is a
 few GB per day, so 5 days fits easily on `/` (78 GB free); watch **System → Server resources → Storage /**.
@@ -155,7 +155,7 @@ Login is rate-limited to 10 failures per IP per 15 minutes.
 | `GET /api/reports/daily?from&to&scope=process|trunk|did&ref` | daily stats |
 | `GET /api/reports/dispositions` | disposition list |
 | `GET /api/system/health` | Asterisk version, ARI, DB, Redis, last apply result |
-| `GET /api/system/resources` | CPU % (two `/proc/stat` samples 0.4 s apart; idle + iowait = idle), load average, cores, Asterisk's share of all CPU; RAM used / total / available (`MemAvailable`) and swap; storage per real disk mount (ext4/xfs/…, no tmpfs/snap) used / total / free. Feeds the **Server resources** tiles on the System page (refreshed every 5 s; meter amber ≥ 80 %, red ≥ 95 %). Code `src/sysinfo.js` |
+| `GET /api/system/resources` | CPU % (two `/proc/stat` samples 0.4 s apart; idle + iowait = idle), load average, cores, Asterisk's share of all CPU; RAM used / total / available (`MemAvailable`) and swap; storage per real disk mount (ext4/xfs/…, no tmpfs/snap) used / total / free. Feeds the **Server resources** tiles on the System page (refreshed every 5 s; meter amber ≥ 80 %, red ≥ 95 %). The small graph icon on each tile opens that resource's history (`GET /api/system/resources/history?hours=6|24|72|120`, from `sys_metrics`). Code `src/sysinfo.js` |
 | `POST /api/system/apply` | force re-render + reload |
 | `GET /api/system/config-preview` | rendered files |
 | `GET /api/system/cli/:what` | read-only `asterisk -rx`: `endpoints`, `registrations`, `contacts`, `groups`, `channels`, `channelstats`, `transports`, `qualify`, `rtp` |

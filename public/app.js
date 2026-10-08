@@ -803,6 +803,29 @@ PAGES.stats = async (main) => {
   f.addEventListener('submit', (e) => { e.preventDefault(); load().catch((er) => toast(er.message, true)); });
   await fillRefs(); load().catch((er) => toast(er.message, true));
 };
+// System page: history of one resource in a modal. key = cpu | mem | disk:<mount>
+function resourceGraph(key, title) {
+  const get = key === 'cpu' ? (p) => p.cpu : key === 'mem' ? (p) => p.mem : ((m) => (p) => p.disks[m])(key.slice(5));
+  const RANGES = [[6, '6 h'], [24, '24 h'], [72, '3 days'], [120, '5 days']];
+  openModal(`${title} — history`, `<div class="mbody"><div class="tabs" id="rgTabs">${RANGES.map(([h, l]) => `<button data-h="${h}" class="${h === 24 ? 'on' : ''}">${l}</button>`).join('')}</div>
+    <div class="rh-lab">${esc(title)} <b class="num" data-cur></b></div><div class="rh-chart" id="rgChart">Loading…</div>
+    <p class="hint" style="margin-top:8px">One sample per minute (CPU = average over the minute), kept 5 days. Longer ranges show averages.</p></div>`, (card) => {
+    let hours = 24;
+    const load = async () => {
+      const r = await api('GET', `/api/system/resources/history?hours=${hours}`);
+      const el = $('#rgChart', card); if (!el) return;
+      if (r.points.filter((p) => get(p) != null).length < 2) { el.innerHTML = '<p class="hint">Collecting — not enough samples for this range yet.</p>'; return; }
+      lineChart(el, r.points, get, hours * 3600000);
+    };
+    $('#rgTabs', card).onclick = (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      $$('#rgTabs button', card).forEach((x) => x.classList.toggle('on', x === b));
+      hours = +b.dataset.h; load().catch((er) => toast(er.message, true));
+    };
+    load().catch((er) => { $('#rgChart', card).textContent = er.message; });
+  });
+}
+
 // % line over time (0–100, one axis), crosshair + tooltip on hover. get(point) -> value or undefined (gap).
 function lineChart(el, pts, get, spanMs) {
   const W = 520, H = 150, L = 34, R = 8, T = 8, B = 20, end = Date.now(), start = end - spanMs;
@@ -1333,21 +1356,30 @@ DiagTab.log = async (el, preset = '') => {
       <label class="check" style="max-width:none"><input type="checkbox" name="VERBOSE" checked> VERBOSE</label>
       <label class="check" style="max-width:none"><input type="checkbox" name="DTMF"> DTMF</label>
       <label style="max-width:120px">Lines<select name="lines"><option>200</option><option selected>500</option><option>1000</option><option>2000</option></select></label>
+      <label class="check" style="max-width:none" title="what asterisk -rvvv shows, refreshed every 3 s"><input type="checkbox" name="follow" ${preset ? '' : 'checked'}> Follow live (every 3 s)</label>
       <div class="actions"><button class="btn primary">Search</button></div></form>
     <div class="summary" id="lSum"></div><div class="body" style="padding-top:0"><pre class="code logbox" id="lOut">Loading…</pre></div></div>`;
   const f = $('#lf');
+  let first = true;
   const load = async () => {
     const levels = ['ERROR', 'WARNING', 'NOTICE', 'VERBOSE', 'DTMF', 'DEBUG'].filter((l) => f[l] ? f[l].checked : false);
     const r = await api('GET', '/api/diag/log?' + new URLSearchParams({ q: f.q.value.trim(), lines: f.lines.value, levels: levels.join(',') }));
+    const out = $('#lOut'); if (!out) return;
+    const atEnd = first || out.scrollHeight - out.scrollTop - out.clientHeight < 40;   // stays put while you scroll up
     $('#lSum').innerHTML = `<span class="chip mono">${esc(r.file)}</span><span class="chip">${fmtInt(r.lines.length)} lines</span><span class="chip">searched last ${fmtInt(Math.round(r.scannedBytes / 1024))} KB</span>`;
     $('#lOut').innerHTML = r.lines.length ? r.lines.map((l) => {
       const lv = (/\]\s+([A-Z]+)\[/.exec(l) || [])[1];
       return `<span class="${LOG_CLS[lv] || ''}">${esc(l).replace(/\[(C-[0-9a-f]{8})\]/g, '[<a href="#" data-cid="$1">$1</a>]')}</span>`;
     }).join('\n') : 'No matching lines.';
-    $('#lOut').scrollTop = $('#lOut').scrollHeight;
-    $$('#lOut [data-cid]').forEach((a) => (a.onclick = (e) => { e.preventDefault(); f.q.value = a.dataset.cid; f.VERBOSE.checked = true; load().catch((er) => toast(er.message, true)); }));
+    if (atEnd) out.scrollTop = out.scrollHeight;
+    first = false;
+    $$('#lOut [data-cid]').forEach((a) => (a.onclick = (e) => { e.preventDefault(); f.q.value = a.dataset.cid; f.VERBOSE.checked = true; f.follow.checked = false; first = true; load().catch((er) => toast(er.message, true)); }));
   };
-  f.addEventListener('submit', (e) => { e.preventDefault(); load().catch((er) => toast(er.message, true)); });
+  const reload = () => { first = true; load().catch((er) => toast(er.message, true)); };
+  f.addEventListener('submit', (e) => { e.preventDefault(); reload(); });
+  f.q.addEventListener('input', () => { clearTimeout(Diag.logQ); if (f.follow.checked) Diag.logQ = setTimeout(reload, 400); });
+  f.addEventListener('change', (e) => { if (e.target !== f.q) reload(); });
+  diagPoll(() => (f.follow.checked ? load() : Promise.resolve()), 3000);
   await load();
 };
 
@@ -1386,17 +1418,9 @@ DiagTab.lookup = async (el) => {
 
 // =================================================================== SYSTEM
 PAGES.system = async (main) => {
-  main.innerHTML = `<div class="head"><div><h1>System</h1><p>Health, generated Asterisk config, live Asterisk views and audit log.</p></div>
+  main.innerHTML = `<div class="head"><div><h1>System</h1><p>Server resources, health, generated Asterisk config, Asterisk views and audit log. Live Asterisk CLI log: <a href="#/diag?tab=log">Diagnostics → Asterisk log</a>.</p></div>
     <div class="actions"><button class="btn" id="reapply">Re-apply config to Asterisk</button></div></div>
     <div class="panel" style="margin-bottom:14px"><h2>Server resources <small id="resInfo" style="font-weight:400;color:var(--ink-3);font-size:12.5px"></small></h2><div class="body"><div class="grid kpis" id="res" style="margin-bottom:0">Loading…</div></div></div>
-    <div class="panel" style="margin-bottom:14px"><h2>Resource history <small style="font-weight:400;color:var(--ink-3);font-size:12.5px">— one sample per minute · kept 5 days</small></h2>
-      <div class="body"><div class="tabs" id="rhTabs">${[[6, '6 h'], [24, '24 h'], [72, '3 days'], [120, '5 days']].map(([h, l]) => `<button data-h="${h}" class="${h === 24 ? 'on' : ''}">${l}</button>`).join('')}</div>
-        <div class="rh-grid" id="rh">Loading…</div></div></div>
-    <div class="panel" style="margin-bottom:14px"><h2>Asterisk CLI log <small style="font-weight:400;color:var(--ink-3);font-size:12.5px">— what <span class="mono">asterisk -rvvv</span> shows · kept 3 days · search older lines in <a href="#/diag?tab=log">Diagnostics → Asterisk log</a></small></h2>
-      <form class="filters" id="clf" style="border-bottom:0"><label style="max-width:300px">Contains<input name="q" class="mono" placeholder="number, IP, C-0000001a, p_code…"></label>
-        <label style="max-width:120px">Lines<select name="lines"><option>100</option><option selected>300</option><option>1000</option></select></label>
-        <label class="check" style="max-width:none"><input type="checkbox" name="follow" checked> Follow (every 3 s)</label></form>
-      <div class="body" style="padding-top:0"><pre class="code logbox" id="cliLog" style="max-height:420px">Loading…</pre></div></div>
     <div class="panel" style="margin-bottom:14px"><h2>Health</h2><div class="body"><div class="health" id="health">Loading…</div></div></div>
     <div class="panel" style="margin-bottom:14px"><h2>Where the UI meets Asterisk</h2><div class="body"><div class="tw"><table>
       <thead><tr><th>UI action</th><th>Backend</th><th>Asterisk</th></tr></thead><tbody>
@@ -1428,49 +1452,20 @@ PAGES.system = async (main) => {
   // CPU / RAM / storage tiles; meter turns amber at 80 %, red at 95 %
   const gb = (b) => (b >= 1e12 ? `${(b / 1e12).toFixed(2)} TB` : `${(b / 1e9).toFixed(1)} GB`);
   const pct = (u, t) => (t ? Math.round((u / t) * 1000) / 10 : 0);
-  const tile = (lab, p, sub) => `<div class="kpi hbox"><div class="lab">${lab}</div><div class="val">${p}<small>%</small></div>${meter(p, 100)}<div class="sub">${sub}</div></div>`;
+  const GRAPH_ICON = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M1.5 13.5h13M3 10.5l3-3.5 2.5 2 4.5-5.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const tile = (lab, p, sub, key, title) => `<div class="kpi hbox"><div class="lab">${lab}<button class="rh-btn" data-graph="${esc(key)}" data-title="${esc(title)}" title="History — last 5 days" aria-label="${esc(title)} history">${GRAPH_ICON}</button></div><div class="val">${p}<small>%</small></div>${meter(p, 100)}<div class="sub">${sub}</div></div>`;
   const resources = async () => {
     const r = await api('GET', '/api/system/resources');
     const c = r.cpu, m = r.memory, d = Math.floor(r.uptime / 86400), h = Math.floor((r.uptime % 86400) / 3600);
     $('#resInfo').textContent = `· ${r.hostname} · up ${d ? d + 'd ' : ''}${h}h · ${c.cores} cores ${c.model}`;
     $('#res').innerHTML =
-      tile('CPU', c.percent, `load ${c.load.join(' / ')} (1 / 5 / 15 min, ${c.cores} cores)${c.asterisk != null ? ` · Asterisk ${c.asterisk}%` : ''}`) +
-      tile('RAM', pct(m.used, m.total), `${gb(m.used)} used of ${gb(m.total)} · ${gb(m.available)} free${m.swapTotal ? ` · swap ${gb(m.swapUsed)} / ${gb(m.swapTotal)}` : ''}`) +
+      tile('CPU', c.percent, `load ${c.load.join(' / ')} (1 / 5 / 15 min, ${c.cores} cores)${c.asterisk != null ? ` · Asterisk ${c.asterisk}%` : ''}`, 'cpu', 'CPU') +
+      tile('RAM', pct(m.used, m.total), `${gb(m.used)} used of ${gb(m.total)} · ${gb(m.available)} free${m.swapTotal ? ` · swap ${gb(m.swapUsed)} / ${gb(m.swapTotal)}` : ''}`, 'mem', 'RAM') +
       r.disks.map((x) => tile(`Storage <span class="mono" style="text-transform:none;letter-spacing:0">${esc(x.mount)}</span>`, pct(x.used, x.total),
-        `${gb(x.used)} used of ${gb(x.total)} · ${gb(x.available)} free <span class="mono" style="color:var(--ink-3)" title="${esc(x.device)}">${esc(x.fstype)}</span>`)).join('');
+        `${gb(x.used)} used of ${gb(x.total)} · ${gb(x.available)} free <span class="mono" style="color:var(--ink-3)" title="${esc(x.device)}">${esc(x.fstype)}</span>`, `disk:${x.mount}`, `Storage ${x.mount}`)).join('');
   };
-  // CPU / RAM / storage history (sys_metrics), small multiples on one 0–100 % scale; refreshed every minute
-  let rhHours = 24;
-  const history = async () => {
-    const r = await api('GET', `/api/system/resources/history?hours=${rhHours}`);
-    const mounts = [...new Set(r.points.flatMap((p) => Object.keys(p.disks)))];
-    const series = [['CPU', (p) => p.cpu], ['RAM', (p) => p.mem], ...mounts.map((m) => [`Storage <span class="mono">${esc(m)}</span>`, (p) => p.disks[m]])];
-    $('#rh').innerHTML = r.points.length < 2 ? '<p class="hint">Collecting — the first points appear after a couple of minutes.</p>'
-      : series.map(([lab], i) => `<div class="rh-cell"><div class="rh-lab">${lab} <b class="num" data-cur></b></div><div class="rh-chart" data-i="${i}"></div></div>`).join('');
-    if (r.points.length < 2) return;
-    $('#rh').querySelectorAll('.rh-chart').forEach((el) => lineChart(el, r.points, series[+el.dataset.i][1], rhHours * 3600000));
-  };
-  $('#rhTabs').onclick = (e) => {
-    const b = e.target.closest('button'); if (!b) return;
-    $('#rhTabs').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
-    rhHours = +b.dataset.h; history().catch((er) => toast(er.message, true));
-  };
-  history().catch((er) => { $('#rh').textContent = er.message; });
-  clearInterval(S.rhTimer);
-  S.rhTimer = setInterval(() => { if (S.page !== 'system') clearInterval(S.rhTimer); else if (!document.hidden) history().catch(() => {}); }, 60000);
-  // live Asterisk CLI log (full log: NOTICE / WARNING / ERROR / VERBOSE / DTMF); stays put while you scroll up
-  const clf = $('#clf'), logEl = $('#cliLog');
-  const cliLog = async () => {
-    const r = await api('GET', '/api/diag/log?' + new URLSearchParams({ q: clf.q.value.trim(), lines: clf.lines.value, levels: 'ERROR,WARNING,NOTICE,VERBOSE,DTMF' }));
-    const atEnd = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
-    logEl.innerHTML = r.lines.length ? r.lines.map((l) => `<span class="${LOG_CLS[(/\]\s+([A-Z]+)\[/.exec(l) || [])[1]] || ''}">${esc(l)}</span>`).join('\n') : 'No matching lines.';
-    if (atEnd) logEl.scrollTop = logEl.scrollHeight;
-  };
-  clf.addEventListener('submit', (e) => e.preventDefault());
-  clf.q.addEventListener('input', () => { clearTimeout(S.cliQ); S.cliQ = setTimeout(() => cliLog().catch(() => {}), 400); });
-  clf.lines.onchange = () => cliLog().catch(() => {});
-  clearInterval(S.cliTimer);
-  S.cliTimer = setInterval(() => { if (S.page !== 'system') clearInterval(S.cliTimer); else if (!document.hidden && clf.follow.checked) cliLog().catch(() => {}); }, 3000);
+  // graph icon on a tile -> that resource's history (sys_metrics, one sample per minute, kept 5 days)
+  $('#res').onclick = (e) => { const b = e.target.closest('[data-graph]'); if (b) resourceGraph(b.dataset.graph, b.dataset.title); };
   clearInterval(S.resTimer);   // every 5 s while the System page is open
   S.resTimer = setInterval(() => { if (S.page !== 'system') clearInterval(S.resTimer); else if (!document.hidden) resources().catch(() => {}); }, 5000);
   const cfg = async () => {
@@ -1500,7 +1495,7 @@ PAGES.system = async (main) => {
     e.preventDefault(); $('#pwErr').textContent = '';
     try { await api('POST', '/api/system/password', formData(e.target)); e.target.reset(); toast('Password changed'); } catch (er) { $('#pwErr').textContent = er.message; }
   });
-  resources().catch((e) => ($('#res').textContent = e.message)); cliLog().catch((e) => (logEl.textContent = e.message)); health().catch(() => {}); cfg().catch((e) => ($('#cfgCode').textContent = e.message)); cli('endpoints'); audit().catch(() => {});
+  resources().catch((e) => ($('#res').textContent = e.message)); health().catch(() => {}); cfg().catch((e) => ($('#cfgCode').textContent = e.message)); cli('endpoints'); audit().catch(() => {});
 };
 
 boot();
