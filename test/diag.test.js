@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { PcapReader, toPcap } = require('../src/diag/pcap');
-const { parse, splitStream, DialogStore } = require('../src/diag/sip');
+const { parse, splitStream, DialogStore, MessageLog } = require('../src/diag/sip');
 const { RtpAnalyzer } = require('../src/diag/rtp');
 
 // ---- build a pcap (Linux cooked v2, like `tcpdump -i any`)
@@ -140,4 +140,57 @@ test('RTP analyzer: loss, sequence errors, one-way detection, DTMF ignored', () 
   assert.strictEqual(s.expected, 100); assert.strictEqual(s.lost, 2); assert.strictEqual(s.lossPct, 2);   // across the 16-bit wrap
   assert.strictEqual(s.seqErrors, 1); assert.strictEqual(s.maxDeltaMs, 60); assert.strictEqual(s.jitterMs < 5, true);
   assert.ok(s.oneWay); assert.ok(s.problems.some((p) => /one-way/.test(p))); assert.ok(s.problems.some((p) => /2% loss/.test(p)));
+});
+
+test('message log keeps every SIP message in order, filters by type and text, polls with after', () => {
+  const log = new MessageLog(5);
+  const pkt = (ts) => ({ ts, src: '10.0.0.5', sport: 5060, dst: '172.20.10.201', dport: 5060, proto: 'udp' });
+  const reg = `REGISTER sip:172.20.10.201 SIP/2.0\r\nFrom: <sip:acme@x>;tag=1\r\nTo: <sip:acme@x>\r\nCall-ID: r1\r\nCSeq: 1 REGISTER\r\n\r\n`;
+  [req('INVITE', 1), resp(100, 'Trying', 1, 'INVITE'), resp(180, 'Ringing', 1, 'INVITE'), reg,
+    resp(401, 'Unauthorized', 1, 'REGISTER').replace(CID, 'r1'), resp(200, 'OK', 1, 'INVITE')].forEach((t, i) => log.add(pkt(i), parse(t)));
+  assert.strictEqual(log.list.length, 5);   // ring buffer
+  assert.deepStrictEqual(log.since(0).map((e) => e.label), ['100 Trying', '180 Ringing', 'REGISTER', '401 Unauthorized', '200 OK']);
+  assert.deepStrictEqual(log.since(0, { types: new Set(['register']) }).map((e) => e.label), ['REGISTER', '401 Unauthorized']);
+  assert.deepStrictEqual(log.since(0, { types: new Set(['call']) }).map((e) => e.code), [100, 180, 200]);
+  assert.deepStrictEqual(log.since(4).map((e) => e.id), [5, 6]);
+  assert.deepStrictEqual(log.since(0, { q: 'r1' }).map((e) => e.label), ['REGISTER', '401 Unauthorized']);   // by Call-ID
+});
+
+test('registration parsers: pjsip show registrations, registrar astdb, log lines, trace packets', () => {
+  const { parseRegistrations, parseRegistrar, lastLogLine, lastPacket } = require('../src/diag/reg');
+  const out = ` <Registration/ServerURI..............................>  <Auth....................>  <Status.......>
+==========================================================================================
+
+ t_airtel-reg/sip:10.1.1.1:5060                           t_airtel-auth               Registered        (exp. 3245s)
+ t_jio-reg/sip:10.2.2.2:5060                              t_jio-auth                  Rejected
+
+Objects found: 2
+`;
+  assert.deepStrictEqual(parseRegistrations(out), {
+    airtel: { serverUri: 'sip:10.1.1.1:5060', status: 'Registered', expiresIn: 3245 },
+    jio: { serverUri: 'sip:10.2.2.2:5060', status: 'Rejected', expiresIn: null } });
+  const db = `/registrar/contact/p_acme;@8f3a1b : {"expiration_time":"1791440462","via_port":"5062","user_agent":"Asterisk PBX 18.9","uri":"sip:acme@203.0.113.5:5062;ob","endpoint":"p_acme","via_addr":"203.0.113.5"}
+/registrar/contact/p_beta;@aa : {"expiration_time":"1791440000","uri":"sip:beta@[2001:db8::7]:5060"}
+/registrar/contact/other;@x : {"uri":"sip:x@1.1.1.1"}
+1 results found.`;
+  const r = parseRegistrar(db);
+  assert.deepStrictEqual(Object.keys(r), ['acme', 'beta']);
+  assert.deepStrictEqual(r.acme[0], { uri: 'sip:acme@203.0.113.5:5062;ob', ip: '203.0.113.5', port: 5062, userAgent: 'Asterisk PBX 18.9', expiresAt: 1791440462000 });
+  assert.strictEqual(r.beta[0].ip, '2001:db8::7');
+  const lines = [
+    "[Oct  8 10:00:01] NOTICE[1] res_stir_shaken/crypto_utils.c: Registered object TNAuthList as NID 1487",
+    "[Oct  8 10:01:02] WARNING[2] res_pjsip_outbound_registration.c: Fatal response '403' received from 'sip:10.2.2.2:5060' on registration attempt to 'sip:u@10.2.2.2:5060', stopping outbound registration",
+    "[Oct  8 10:02:03] NOTICE[3] res_pjsip/pjsip_distributor.c: Request 'REGISTER' from '<sip:acme@203.0.113.5>' failed for '203.0.113.5:5062' (callid: abc) - Failed to authenticate",
+  ];
+  assert.match(lastLogLine(lines, ['t_jio', '10.2.2.2']).line, /Fatal response '403'/);
+  assert.strictEqual(lastLogLine(lines, ['t_jio', '10.2.2.2']).level, 'WARNING');
+  assert.match(lastLogLine(lines, ['p_acme', 'acme@']).line, /Failed to authenticate/);
+  assert.strictEqual(lastLogLine(lines, ['TNAuthList']), null);   // stir_shaken noise ignored
+  const log = new MessageLog();
+  const pk = (src, dst) => ({ ts: 5, src, sport: 5062, dst, dport: 5060, proto: 'udp' });
+  log.add(pk('203.0.113.5', '172.20.10.201'), parse(`REGISTER sip:x SIP/2.0\r\nFrom: <sip:acme@x>;tag=1\r\nTo: <sip:acme@x>\r\nCall-ID: r9\r\nCSeq: 2 REGISTER\r\n\r\n`));
+  log.add(pk('172.20.10.201', '203.0.113.5'), parse(`SIP/2.0 401 Unauthorized\r\nFrom: <sip:acme@x>;tag=1\r\nTo: <sip:acme@x>;tag=2\r\nCall-ID: r9\r\nCSeq: 2 REGISTER\r\n\r\n`));
+  assert.strictEqual(lastPacket(log, [], ['acme']).label, '401 Unauthorized');
+  assert.strictEqual(lastPacket(log, ['203.0.113.5'], []).callId, 'r9');
+  assert.strictEqual(lastPacket(log, ['9.9.9.9'], ['nobody']), null);
 });

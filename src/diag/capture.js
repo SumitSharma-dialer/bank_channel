@@ -7,7 +7,7 @@ const os = require('os');
 const path = require('path');
 const cfg = require('../config');
 const { PcapReader, toPcap } = require('./pcap');
-const { parse, splitStream, DialogStore } = require('./sip');
+const { parse, splitStream, DialogStore, MessageLog } = require('./sip');
 const { RtpAnalyzer } = require('./rtp');
 
 const TCPDUMP = process.env.TCPDUMP_BIN || 'tcpdump';
@@ -71,11 +71,12 @@ const permHint = (stderr) => (/permitted|permission|denied/i.test(stderr)
 // ------------------------------------------------------------------ live SIP trace
 const trace = {
   store: new DialogStore(),
+  log: new MessageLog(),      // every SIP message, for the live message view
   proc: null, started: null, until: null, filter: '', error: null, packets: 0, timer: null,
 
   status() {
     return { running: !!this.proc, started: this.started, until: this.until, filter: this.filter, label: this.label, error: this.error,
-      packets: this.packets, dialogs: this.store.d.size, keepNoise: this.store.keepNoise };
+      packets: this.packets, dialogs: this.store.d.size, messages: this.log.list.length, lastId: this.log.seq, keepNoise: this.store.keepNoise };
   },
 
   start({ minutes = 10, hosts = [], label = '', keepNoise = false } = {}) {
@@ -91,7 +92,7 @@ const trace = {
     const tcp = new Map();   // TCP flow -> pending bytes
     const reader = new PcapReader((pkt) => {
       this.packets++;
-      const feed = (buf) => { const m = parse(buf); if (m) this.store.add(pkt, m); };
+      const feed = (buf) => { const m = parse(buf); if (m) { this.log.add(pkt, m); this.store.add(pkt, m); } };
       if (pkt.proto === 'udp') return feed(pkt.payload);
       const k = `${pkt.src}:${pkt.sport}>${pkt.dst}:${pkt.dport}`;
       const r = splitStream(Buffer.concat([tcp.get(k) || Buffer.alloc(0), pkt.payload]));
@@ -120,7 +121,7 @@ const trace = {
     return this.status();
   },
 
-  clear() { this.store.clear(); this.packets = 0; return this.status(); },
+  clear() { this.store.clear(); this.log.clear(); this.packets = 0; return this.status(); },
 
   pcap(callId) {
     const g = this.store.get(callId);

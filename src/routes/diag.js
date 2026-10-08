@@ -61,6 +61,9 @@ router.get('/status', wrap(async (req, res) => {
 router.get('/issues', wrap(async (req, res) => res.json(await issues.list(int(req.query.limit, { min: 10, max: 1000, def: 200 })))));
 router.post('/issues/run', wrap(async (req, res) => { await issues.run(); res.json(await issues.list()); }));
 
+// ------------------------------------------------------------------ registrations
+router.get('/registrations', wrap(async (req, res) => res.json(await require('../diag/reg').collect(cap.trace.log))));
+
 // ------------------------------------------------------------------ SIP trace
 router.post('/sip/start', wrap(async (req, res) => {
   const tg = await target(req.body);
@@ -74,6 +77,12 @@ router.post('/sip/clear', (req, res) => res.json(cap.trace.clear()));
 router.get('/sip/dialogs', (req, res) => {
   const method = /^[A-Z]{3,10}$/.test(req.query.method || '') ? req.query.method : '';
   res.json({ status: cap.trace.status(), dialogs: cap.trace.store.list({ q: str(req.query.q, 64), method, limit: 500 }) });
+});
+// live message stream: poll with ?after=<last id>; types=call,register,options,other
+router.get('/sip/messages', (req, res) => {
+  const types = new Set(String(req.query.types || '').split(',').filter((t) => ['call', 'register', 'options', 'other'].includes(t)));
+  const after = Math.max(0, parseInt(req.query.after, 10) || 0);
+  res.json({ status: cap.trace.status(), messages: cap.trace.log.since(after, { types, q: str(req.query.q, 64), limit: after ? 500 : 300 }) });
 });
 router.get('/sip/dialog', (req, res) => {
   const g = cap.trace.store.get(String(req.query.id || ''));

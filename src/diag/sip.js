@@ -147,4 +147,48 @@ class DialogStore {
   get(callId) { return this.d.get(callId) || null; }
 }
 
-module.exports = { parse, sdp, splitStream, DialogStore, nameAddr };
+// ------------------------------------------------------------------ live message log
+// Every SIP message in arrival order (requests AND responses, REGISTER / OPTIONS included), like sngrep's raw view
+// or `tcpdump -A`. A ring buffer; clients poll with ?after=<id>.
+const CALL_METHODS = new Set(['INVITE', 'ACK', 'BYE', 'CANCEL', 'PRACK', 'UPDATE', 'INFO', 'REFER']);
+function msgType(m) {
+  const meth = m.cseqMethod || m.method;
+  if (CALL_METHODS.has(meth)) return 'call';
+  if (meth === 'REGISTER') return 'register';
+  if (meth === 'OPTIONS') return 'options';
+  return 'other';
+}
+
+class MessageLog {
+  constructor(max = 5000) { this.max = max; this.list = []; this.seq = 0; }
+
+  clear() { this.list = []; }
+
+  add(pkt, m) {
+    const e = { id: ++this.seq, ts: pkt.ts, src: `${pkt.src}:${pkt.sport}`, dst: `${pkt.dst}:${pkt.dport}`, proto: pkt.proto,
+      type: msgType(m), request: m.request, label: m.request ? m.method : `${m.code} ${m.reason}`.trim(), code: m.code,
+      method: m.cseqMethod || m.method, cseq: `${m.cseq} ${m.cseqMethod}`, callId: m.callId, from: m.from.user, to: m.to.user,
+      ua: m.ua, xdid: m.xdid, xnum: m.xnum, sdp: m.sdp ? `${m.sdp.ip}:${m.sdp.port} ${m.sdp.codecs.slice(0, 3).join('/')}` : '',
+      raw: m.raw };
+    this.list.push(e);
+    if (this.list.length > this.max) this.list.splice(0, this.list.length - this.max);
+    return e;
+  }
+
+  // messages with id > after; types: Set of call/register/options/other (empty = all); q: text in Call-ID/From/To/IPs/raw
+  since(after = 0, { types = null, q = '', limit = 500 } = {}) {
+    const needle = String(q).toLowerCase();
+    const out = [];
+    for (let i = this.list.length - 1; i >= 0 && out.length < limit; i--) {
+      const e = this.list[i];
+      if (e.id <= after) break;
+      if (types && types.size && !types.has(e.type)) continue;
+      if (needle && ![e.callId, e.from, e.to, e.src, e.dst, e.xnum, e.xdid].some((v) => String(v || '').toLowerCase().includes(needle))
+        && !e.raw.toLowerCase().includes(needle)) continue;
+      out.push(e);
+    }
+    return out.reverse();
+  }
+}
+
+module.exports = { parse, sdp, splitStream, DialogStore, MessageLog, msgType, nameAddr };
