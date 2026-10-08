@@ -25,6 +25,13 @@ test('password process uses auth_username identification', () => {
   assert.ok(p.includes('[p_acme-auth]') && p.includes('password=secret123'));
 });
 
+test('password process with IPs is locked to them, without identify by IP', () => {
+  const p = renderProcesses([{ ...proc, allowed_ips: '1.2.3.4,5.6.7.0/24' }]);
+  assert.ok(p.includes('deny=0.0.0.0/0.0.0.0\npermit=1.2.3.4\npermit=5.6.7.0/24\n'));
+  assert.ok(!p.includes('-identify]') && p.includes('[p_acme-auth]'));
+  assert.ok(!renderProcesses([proc]).includes('deny='), 'no IPs = any IP');
+});
+
 test('ip process renders identify with every IP', () => {
   const p = renderProcesses([{ ...proc, auth_type: 'ip', allowed_ips: '1.2.3.4,5.6.7.0/24' }]);
   assert.ok(p.includes('match=1.2.3.4') && p.includes('match=5.6.7.0/24') && !p.includes('-auth]'));

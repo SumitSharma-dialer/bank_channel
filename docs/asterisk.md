@@ -13,7 +13,7 @@
 | File | Written by | Content | Reloaded with |
 |---|---|---|---|
 | `/etc/asterisk/sipdist/trunks.conf` | `renderTrunks()` | per active trunk: `[t_<name>]` aor, `[t_<name>-auth]` (if user/pass), `[t_<name>]` endpoint, `[t_<name>-identify]`, `[t_<name>-reg]` (if register) | `res_pjsip.so`, `res_pjsip_outbound_registration.so` |
-| `/etc/asterisk/sipdist/processes.conf` | `renderProcesses()` | per process: `[p_<code>]` aor (first fixed IP), endpoint, `[p_<code>-identify]` with `match=` per allowed IP (or `-auth` for password auth) | `res_pjsip.so` |
+| `/etc/asterisk/sipdist/processes.conf` | `renderProcesses()` | per process: `[p_<code>]` aor (first fixed IP), endpoint, `[p_<code>-identify]` with `match=` per allowed IP (password auth: `-auth` section, plus `deny`/`permit` on the endpoint if IPs are set) | `res_pjsip.so` |
 | `/etc/asterisk/sipdist/dialplan.conf` | `renderDialplan()` | `[sd-hangup]`, `[sd-inhdr]`, `[sd-from-trunk]`, `[proc-<code>]`, `[sd-cli-<trunk>]`, `[sd-didok-<trunk>]`, `[sd-in-<trunk>]` | `pbx_config.so` |
 
 Directory: owner `asterisk:asterisk`, mode `2750`; files mode `0640`. The systemd unit allows writes only to this

@@ -116,7 +116,9 @@ function renderProcesses(processes) {
       `disallow=all\nallow=${codecs(p.codecs)}\n` +
       `direct_media=no\nrtp_symmetric=yes\nforce_rport=yes\nrewrite_contact=yes\n` +
       `trust_id_inbound=yes\ntimers=no\nallow_subscribe=no\n` +
-      (byIp ? `identify_by=ip\n` : `identify_by=auth_username,username\nauth=${id}-auth\n`) + '\n';
+      (byIp ? `identify_by=ip\n` : `identify_by=auth_username,username\nauth=${id}-auth\n` +
+        // optional IP lock for password auth: requests from any other IP are refused
+        (ips(p.allowed_ips).length ? `deny=0.0.0.0/0.0.0.0\n` + ips(p.allowed_ips).map((i) => `permit=${i}\n`).join('') : '')) + '\n';
     if (byIp) {
       const list = ips(p.allowed_ips);
       if (list.length) {

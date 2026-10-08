@@ -469,7 +469,7 @@ async function loadProcs() {
     return `<tr>
       <td class="t-name"><b>${esc(p.name)}</b><small>${esc(p.code)}</small></td>
       <td>${trunkCell}</td>
-      <td>${p.auth_type === 'password' ? `<span class="chip">user</span> <span class="mono" style="font-size:12px">${esc(p.sip_username)}</span>`
+      <td>${p.auth_type === 'password' ? `<span class="chip">user</span> <span class="mono" style="font-size:12px">${esc(p.sip_username)}</span>${p.allowed_ips ? `<br><small class="mono" title="${esc(p.allowed_ips.split(',').join('\n'))}">${esc(p.allowed_ips.split(',').slice(0, 2).join(', '))}${p.allowed_ips.split(',').length > 2 ? '…' : ''}</small>` : ''}`
         : `<span class="mono" style="font-size:12px" title="${esc(p.allowed_ips.split(',').join('\n'))}">${esc(p.allowed_ips.split(',').slice(0, 2).join(', ')) || '<span class="chip bad">none</span>'}${p.allowed_ips.split(',').length > 2 ? '…' : ''}</span>`}</td>
       <td>${usage(L.live, p.channel_limit)}</td>
       <td><div class="dirs">${dirChip('OUT', p.allow_outbound !== false, p.out_hours)}${dirChip('IN', p.allow_inbound !== false, p.in_hours)}</div></td>
@@ -527,7 +527,7 @@ async function procForm(p) {
     <label class="full">Authentication<select name="auth_type">
       <option value="ip" ${byPass ? '' : 'selected'}>By server IP — calls accepted only from the customer's IPs</option>
       <option value="password" ${byPass ? 'selected' : ''}>Username + password — the customer registers / authenticates (any IP)</option></select></label>
-    <label class="full a-ip">Customer server IPs <small>calls are accepted only from these IPs · comma separated, CIDR allowed · each IP belongs to one process · the first single IP receives inbound DID calls</small><input name="allowed_ips" value="${esc(v.allowed_ips || '')}" placeholder="203.0.113.25, 198.51.100.0/28" class="mono"></label>
+    <label class="full">Customer server IPs <small class="a-ip">calls are accepted only from these IPs · comma separated, CIDR allowed · each IP belongs to one process · the first single IP receives inbound DID calls</small><small class="a-pw">optional · if set, the username is accepted only from these IPs · comma separated, CIDR allowed · blank = any IP</small><input name="allowed_ips" value="${esc(v.allowed_ips || '')}" placeholder="203.0.113.25, 198.51.100.0/28" class="mono"></label>
     <label class="a-pw">SIP username <small>blank = process code</small><input name="sip_username" value="${esc(v.sip_username || '')}" class="mono" pattern="[A-Za-z0-9_.\\-]{2,64}" autocomplete="off"></label>
     <label class="a-pw">SIP password <small>${p && p.sip_password ? 'leave as is to keep current' : '8+ chars, no spaces'}</small><div class="row"><input name="sip_password" value="${esc(v.sip_password || sug.sip_password)}" class="mono" minlength="8" autocomplete="new-password"><button type="button" class="btn" id="sugPw">Generate</button></div></label>
     <p class="hint full a-pw">Inbound DID calls go to wherever the customer is currently registered — their Asterisk must REGISTER to this server to receive them.</p>

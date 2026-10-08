@@ -56,16 +56,18 @@ async function parse(b, id) {
       throw new Bad('SIP password: 8–128 chars, no spaces or ; # [ ]');
   }
 
-  // IPs only identify IP-auth processes; a password process is found by its username
-  const list = auth_type === 'ip' ? str(b.allowed_ips, 2000).split(/[\s,]+/).filter(Boolean) : [];
+  // ip auth: the IPs identify the process. password auth: optional — the username is accepted only from these IPs
+  const list = str(b.allowed_ips, 2000).split(/[\s,]+/).filter(Boolean);
   for (const ip of list) if (!IP_RE.test(ip)) throw new Bad(`bad IP/CIDR: ${ip}`);
   p.allowed_ips = list.join(',');
-  if (auth_type === 'ip') {
-    if (!list.length) throw new Bad('IP authentication needs at least one customer IP');
-    const others = await q(`SELECT code, allowed_ips FROM processes WHERE auth_type='ip' AND id<>$1`, [id || 0]);
+  if (auth_type === 'ip' && !list.length) throw new Bad('IP authentication needs at least one customer IP');
+  if (list.length) {
+    // Asterisk matches IP-auth processes by source IP before it looks at usernames, so an IP of an IP-auth process
+    // can't be shared with any other process. Password processes may share IPs among themselves.
+    const others = await q(`SELECT code, auth_type, allowed_ips FROM processes WHERE id<>$1 ${auth_type === 'ip' ? '' : "AND auth_type='ip'"}`, [id || 0]);
     for (const o of others.rows) {
       const clash = o.allowed_ips.split(',').find((x) => list.includes(x));
-      if (clash) throw new Bad(`IP ${clash} is already used by process ${o.code} — each IP must identify one process`);
+      if (clash) throw new Bad(`IP ${clash} is already used by process ${o.code}${o.auth_type === 'ip' ? ' (IP authentication)' : ''} — an IP-authenticated IP must belong to one process only`);
     }
   }
   if (p.trunk_id) {
