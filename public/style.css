@@ -322,3 +322,5 @@ td small, .mono small { color: var(--ink-3); font-family: var(--sans); }
 }
 .logline { font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
 .logline.bad { color: var(--bad); } .logline.warn { color: var(--warn); } .logline.info { color: var(--info); }
+.lmhidden { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 8px 16px; background: var(--warn-soft); color: var(--warn); font-size: 13px; border-bottom: 1px solid var(--line); }
+.lmhidden.hidden { display: none; }

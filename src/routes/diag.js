@@ -82,7 +82,9 @@ router.get('/sip/dialogs', (req, res) => {
 router.get('/sip/messages', (req, res) => {
   const types = new Set(String(req.query.types || '').split(',').filter((t) => ['call', 'register', 'options', 'other'].includes(t)));
   const after = Math.max(0, parseInt(req.query.after, 10) || 0);
-  res.json({ status: cap.trace.status(), messages: cap.trace.log.since(after, { types, q: str(req.query.q, 64), limit: after ? 500 : 300 }) });
+  const hidden = {};
+  const messages = cap.trace.log.since(after, { types, q: str(req.query.q, 64), limit: after ? 500 : 300, hidden });
+  res.json({ status: cap.trace.status(), messages, hidden });
 });
 router.get('/sip/dialog', (req, res) => {
   const g = cap.trace.store.get(String(req.query.id || ''));

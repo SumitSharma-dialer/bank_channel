@@ -176,13 +176,14 @@ class MessageLog {
   }
 
   // messages with id > after; types: Set of call/register/options/other (empty = all); q: text in Call-ID/From/To/IPs/raw
-  since(after = 0, { types = null, q = '', limit = 500 } = {}) {
+  // hidden (optional object) collects counts per type of messages left out by the type filter
+  since(after = 0, { types = null, q = '', limit = 500, hidden = null } = {}) {
     const needle = String(q).toLowerCase();
     const out = [];
     for (let i = this.list.length - 1; i >= 0 && out.length < limit; i--) {
       const e = this.list[i];
       if (e.id <= after) break;
-      if (types && types.size && !types.has(e.type)) continue;
+      if (types && types.size && !types.has(e.type)) { if (hidden) hidden[e.type] = (hidden[e.type] || 0) + 1; continue; }
       if (needle && ![e.callId, e.from, e.to, e.src, e.dst, e.xnum, e.xdid].some((v) => String(v || '').toLowerCase().includes(needle))
         && !e.raw.toLowerCase().includes(needle)) continue;
       out.push(e);

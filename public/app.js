@@ -961,6 +961,7 @@ DiagTab.sip = async (el) => {
           <label class="check"><input type="checkbox" id="lmScroll" checked> auto-scroll</label></span>
         <div class="actions"><button type="button" class="btn sm" id="lmPause">Pause</button><button type="button" class="btn sm" id="lmEmpty">Clear view</button></div>
       </div>
+      <div class="lmhidden hidden" id="lmHidden"></div>
       <div class="lmhead"><span>Time</span><span>From → To</span><span>Message</span><span>CSeq</span><span>From user → To user</span><span>Call-ID</span></div>
       <div class="lmlist" id="lmList"><div class="empty">Start a trace: every SIP request and response shows up here as it happens.</div></div>
     </div>
@@ -1000,7 +1001,16 @@ DiagTab.sip = async (el) => {
   $('#stQ').oninput = () => load().catch(() => {}); $('#stM').onchange = () => load().catch(() => {});
 
   // ---- live messages: poll new messages every second and append (like sngrep raw / tcpdump -A)
-  let after = 0, paused = false, rows = 0;
+  let after = 0, paused = false, rows = 0, hiddenTot = {};
+  const TYPE_NAME = { call: 'call', register: 'REGISTER', options: 'OPTIONS', other: 'other' };
+  // messages left out by the type checkboxes: say so, with a one-click "show"
+  const showHidden = () => {
+    const ks = Object.keys(hiddenTot).filter((k) => hiddenTot[k]);
+    $('#lmHidden').classList.toggle('hidden', !ks.length);
+    $('#lmHidden').innerHTML = ks.map((k) => `<span>${fmtInt(hiddenTot[k])} ${TYPE_NAME[k]} message${hiddenTot[k] > 1 ? 's' : ''} hidden${k === 'options' ? ' (keep-alive pings to trunks / customers)' : ''}</span>
+      <button type="button" class="btn sm" data-show="${k}">Show ${TYPE_NAME[k]}</button>`).join('');
+    $$('#lmHidden [data-show]').forEach((b) => (b.onclick = () => { $(`.lt[value=${b.dataset.show}]`, el).checked = true; lmReset(); live().catch(() => {}); }));
+  };
   const list = $('#lmList');
   const types = () => $$('.lt', el).filter((c) => c.checked).map((c) => c.value).join(',');
   const cls = (m) => (m.request ? 'req' : m.code < 200 ? 'prov' : m.code < 300 ? 'ok' : 'bad');
@@ -1016,14 +1026,19 @@ DiagTab.sip = async (el) => {
     $('.cid', d).onclick = (e) => { e.stopPropagation(); flow(m.callId); };
     return d;
   };
-  const lmReset = () => { after = 0; rows = 0; list.innerHTML = '<div class="empty">Waiting for SIP messages…</div>'; };
+  const lmReset = () => { after = 0; rows = 0; hiddenTot = {}; showHidden(); list.innerHTML = '<div class="empty">Waiting for SIP messages…</div>'; };
   const live = async () => {
     if (paused) return;
     if (!types()) { rows = 0; list.innerHTML = '<div class="empty">Tick at least one message type.</div>'; return; }
     const r = await api('GET', '/api/diag/sip/messages?' + new URLSearchParams({ after, types: types(), q: $('#lmQ').value.trim() }));
     status(r.status);
+    for (const [k, n] of Object.entries(r.hidden || {})) hiddenTot[k] = (hiddenTot[k] || 0) + n;
+    showHidden();
     if (!r.messages.length) {
-      if (!rows) list.innerHTML = `<div class="empty">${r.status.running ? 'Waiting for SIP messages…' : 'Start a trace: every SIP request and response shows up here as it happens.'}</div>`;
+      const nh = Object.values(hiddenTot).reduce((a, b) => a + b, 0);
+      if (!rows) list.innerHTML = `<div class="empty">${nh ? `Nothing to show with the ticked types — ${fmtInt(nh)} message(s) are hidden, see above.`
+        : r.status.running ? 'Waiting for SIP messages… (a pjsip reload only sends OPTIONS to trunks/customers; REGISTER appears only for trunks with a username/password)'
+          : 'Start a trace: every SIP request and response shows up here as it happens.'}</div>`;
       after = Math.max(after, r.status.lastId || 0);
       return;
     }
