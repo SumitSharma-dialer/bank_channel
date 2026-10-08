@@ -406,6 +406,8 @@ ALTER TABLE calls ADD COLUMN IF NOT EXISTS direction VARCHAR(3) NOT NULL DEFAULT
 ALTER TABLE trunks ADD COLUMN IF NOT EXISTS allow_inbound BOOLEAN NOT NULL DEFAULT TRUE;
 -- per trunk: max new outbound calls per second (0 = unlimited); extra calls wait up to 3 s, then TRUNK_LIMIT
 ALTER TABLE trunks ADD COLUMN IF NOT EXISTS cps INT NOT NULL DEFAULT 0 CHECK (cps >= 0);
+-- per trunk: prepended to the caller ID (DID) sent on outbound calls, like prefix is for the number
+ALTER TABLE trunks ADD COLUMN IF NOT EXISTS cli_prefix VARCHAR(32) NOT NULL DEFAULT '';
 -- per process: which call directions are allowed, and optional working time for each
 -- out_hours / in_hours: NULL = any time, else {"days":["mon",..],"from":"09:00","to":"18:00"} (STATS_TZ)
 ALTER TABLE processes ADD COLUMN IF NOT EXISTS allow_outbound BOOLEAN NOT NULL DEFAULT TRUE;

@@ -7,15 +7,17 @@ const { Bad, wrap, str, int, bool, name, HOST_RE, codecs, safeText } = require('
 
 const PUBLIC_COLS = `t.id,t.name,t.description,t.host,t.port,t.transport,t.username,
   (t.password IS NOT NULL AND t.password<>'') AS has_password,t.register,t.from_user,t.from_domain,
-  t.max_channels,t.cps,t.prefix,t.strip_digits,t.codecs,t.dial_timeout,t.allow_inbound,t.active,t.created_at,t.updated_at`;
+  t.max_channels,t.cps,t.prefix,t.cli_prefix,t.strip_digits,t.codecs,t.dial_timeout,t.allow_inbound,t.active,t.created_at,t.updated_at`;
 
 function parse(b, existing) {
   // dialing fields are no longer in the form: not sent = keep current value (new trunk = default)
-  for (const k of ['prefix', 'strip_digits', 'codecs', 'dial_timeout']) if (b[k] === undefined && existing) b = { ...b, [k]: existing[k] };
+  for (const k of ['prefix', 'cli_prefix', 'strip_digits', 'codecs', 'dial_timeout']) if (b[k] === undefined && existing) b = { ...b, [k]: existing[k] };
   const host = str(b.host);
   if (!HOST_RE.test(host)) throw new Bad('host must be an IP or hostname');
   const prefix = str(b.prefix, 32);
   if (!/^\+?[0-9]*$/.test(prefix)) throw new Bad('prefix may only contain digits (and a leading +)');
+  const cliPrefix = str(b.cli_prefix, 32);
+  if (!/^\+?[0-9]*$/.test(cliPrefix)) throw new Bad('CLI prefix may only contain digits (and a leading +)');
   return {
     name: name(b.name, 'Trunk name'),
     description: safeText(b.description, 200),
@@ -31,6 +33,7 @@ function parse(b, existing) {
     max_channels: int(b.max_channels, { min: 0, max: 100000, def: 30 }),
     cps: int(b.cps, { min: 0, max: 1000, def: existing ? existing.cps : 0 }),
     prefix,
+    cli_prefix: cliPrefix,
     strip_digits: int(b.strip_digits, { min: 0, max: 10, def: 0 }),
     codecs: codecs(b.codecs),
     dial_timeout: int(b.dial_timeout, { min: 5, max: 300, def: 60 }),

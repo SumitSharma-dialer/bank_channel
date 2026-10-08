@@ -205,6 +205,8 @@ function dialTail(p, t, num, cliLines) {
     cpsGate(t) +
     ` same => n,Set(SD_OUT=${prefix}\${${num}:${strip}})\n` +
     cliLines +
+    (NUM_RE.test(t.cli_prefix || '') && t.cli_prefix
+      ? ` same => n,Set(CALLERID(all)=${t.cli_prefix}\${CALLERID(num)} <${t.cli_prefix}\${CALLERID(num)}>)\n` : '') +
     ` same => n,Set(SD_CLIOUT=\${CALLERID(num)})\n` +
     ` same => n,Dial(PJSIP/\${SD_OUT}@t_${t.name},${timeout})\n` +
     ` same => n,Hangup()\n` +

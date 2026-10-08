@@ -100,7 +100,7 @@ Generated context `[proc-<code>]` (see `renderDialplan` / `headerCheck` / `dialT
    Then the trunk CPS limit (`trunks.cps`, 0 = off): `GROUP(sdcps)=<trunk>_<EPOCH>` then `GROUP_COUNT > cps` → the
    call waits 100 ms and retries (next second = new group), up to 30 times (3 s), then `TRUNK_LIMIT`. Calls are
    paced, not dropped, during short bursts.
-7. Number sent = `trunks.prefix` + `X-Number` with `strip_digits` removed; caller ID = the DID.
+7. Number sent = `trunks.prefix` + `X-Number` with `strip_digits` removed; caller ID = `trunks.cli_prefix` + the DID.
    `Dial(PJSIP/<number>@t_<trunk>, dial_timeout)`.
 8. At hangup, handler `[sd-hangup]` sends `UserEvent(SIPDIST_END, ...)`. Node (`tracker.saveCall`) receives it over ARI
    and inserts one row in `calls` and upserts `daily_stats` (scopes `process`, `trunk`, `did`).

@@ -65,6 +65,13 @@ test('dialplan enforces process + trunk limits with join-then-check', () => {
   assert.ok(d.indexOf('Set(GROUP(sdproc)') < d.indexOf('GROUP_COUNT(acme'), 'join before count');
 });
 
+test('trunk cli_prefix is prepended to the caller ID after it is set, before Dial', () => {
+  const d = renderDialplan([proc], [{ ...trunk, cli_prefix: '0' }]);
+  const set = d.indexOf('Set(CALLERID(all)=0${CALLERID(num)} <0${CALLERID(num)}>)');
+  assert.ok(set > d.indexOf('Set(CALLERID(all)=${SD_DID}') && set < d.indexOf('Dial(PJSIP/${SD_OUT}@t_airtel1'));
+  assert.ok(!renderDialplan([proc], [trunk]).includes('=0${CALLERID(num)}'), 'no cli_prefix = caller ID unchanged');
+});
+
 test('dialplan uses the last 10 digits of X-DID and X-Number', () => {
   const d = renderDialplan([proc], [trunk]);
   assert.ok(d.includes('Set(SD_DID=${FILTER(0-9,${SD_HDID}):-10})'));
