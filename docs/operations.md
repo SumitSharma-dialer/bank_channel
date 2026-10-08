@@ -99,6 +99,7 @@ Login is rate-limited to 10 failures per IP per 15 minutes.
 | `GET /api/processes/:id/peer-config` | customer-side PJSIP / chan_sip sample |
 | `GET /api/processes/:id/header-log` | last 50 header calls (is the customer sending X-DID / X-Number?) |
 | `GET /api/processes/suggest` | random dummy number + password |
+| `GET /api/processes/registrations` | `{code: [{ip, port, userAgent, expiresIn}]}` for processes registered right now (`database show registrar`); missing code = not registered. Feeds the Registration column on the Processes page (refreshed every 15 s) |
 | `GET /api/reports/calls?from&to&process&trunk&disposition&direction&did&number&page&size` | call list + totals |
 | `GET /api/reports/calls.csv?…` | CSV export (streamed) |
 | `GET /api/reports/daily?from&to&scope=process|trunk|did&ref` | daily stats |
