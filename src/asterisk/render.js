@@ -87,7 +87,7 @@ function renderTrunks(trunks) {
       (t.from_user ? `from_user=${clean(t.from_user)}\n` : '') +
       (t.from_domain ? `from_domain=${clean(t.from_domain)}\n` : '') +
       `direct_media=no\nrtp_symmetric=yes\nforce_rport=yes\nrewrite_contact=yes\n` +
-      `send_rpid=yes\ntrust_id_outbound=yes\ntimers=no\n\n`;
+      `send_rpid=yes\nsend_pai=yes\ntrust_id_outbound=yes\ntimers=no\n\n`;
     out += `[${id}-identify]\ntype=identify\nendpoint=${id}\nmatch=${host}\n\n`;
     if (t.register && hasAuth) {
       out += `[${id}-reg]\ntype=registration\n${transport}outbound_auth=${id}-auth\n` +
