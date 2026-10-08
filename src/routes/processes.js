@@ -20,8 +20,12 @@ function hours(h, what) {
   return { days, from, to };
 }
 
+const SIP_USER_RE = /^[A-Za-z0-9_.\-]{2,64}$/;
+const SIP_PASS_RE = /^[\x21-\x7e]{8,128}$/;   // printable, no spaces; ; # [ ] are rejected below (they break pjsip.conf)
+
 async function parse(b, id) {
-  const auth_type = 'ip';   // customers are identified by their server IP only
+  // ip = customer identified by its server IP; password = customer authenticates / registers with username + password
+  const auth_type = b.auth_type === 'password' ? 'password' : 'ip';
   const code = name(b.code, 'Process code');
   const p = {
     code,
@@ -44,7 +48,16 @@ async function parse(b, id) {
   };
   if (!/^[0-9]{4,20}$/.test(p.dummy_cli)) throw new Bad('dummy number: 4–20 digits (the number the client dials)');
 
-  const list = str(b.allowed_ips, 2000).split(/[\s,]+/).filter(Boolean);
+  if (auth_type === 'password') {
+    p.sip_username = str(b.sip_username, 64) || code;
+    if (!SIP_USER_RE.test(p.sip_username)) throw new Bad('SIP username: 2–64 chars, letters, digits, _ . -');
+    p.sip_password = str(b.sip_password, 128);
+    if (!SIP_PASS_RE.test(p.sip_password) || /[;#\[\]]/.test(p.sip_password))
+      throw new Bad('SIP password: 8–128 chars, no spaces or ; # [ ]');
+  }
+
+  // IPs only identify IP-auth processes; a password process is found by its username
+  const list = auth_type === 'ip' ? str(b.allowed_ips, 2000).split(/[\s,]+/).filter(Boolean) : [];
   for (const ip of list) if (!IP_RE.test(ip)) throw new Bad(`bad IP/CIDR: ${ip}`);
   p.allowed_ips = list.join(',');
   if (auth_type === 'ip') {

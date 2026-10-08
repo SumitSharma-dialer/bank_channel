@@ -454,7 +454,7 @@ function dirBlock(dir, title, desc, allowed, h) {
 PAGES.processes = async (main) => {
   main.innerHTML = `<div class="head"><div><h1>Processes</h1></div>
     <div class="actions"><button class="btn primary" id="addProc">+ Add process</button></div></div>
-    <div class="panel"><div class="tw"><table><thead><tr><th>Process</th><th>Trunk</th><th>Customer IPs</th><th>Live / limit</th><th>Calls allowed</th><th>Dummy number</th><th class="r">DIDs assigned</th><th>Status</th><th></th></tr></thead><tbody id="pBody"><tr><td colspan="9" class="empty">Loading…</td></tr></tbody></table></div></div>`;
+    <div class="panel"><div class="tw"><table><thead><tr><th>Process</th><th>Trunk</th><th>Customer auth</th><th>Live / limit</th><th>Calls allowed</th><th>Dummy number</th><th class="r">DIDs assigned</th><th>Status</th><th></th></tr></thead><tbody id="pBody"><tr><td colspan="9" class="empty">Loading…</td></tr></tbody></table></div></div>`;
   $('#addProc').onclick = async () => { if (!S.trunks.length) S.trunks = await api('GET', '/api/trunks'); procForm(); };
   [S.trunks] = await Promise.all([api('GET', '/api/trunks')]);
   await loadProcs();
@@ -469,7 +469,8 @@ async function loadProcs() {
     return `<tr>
       <td class="t-name"><b>${esc(p.name)}</b><small>${esc(p.code)}</small></td>
       <td>${trunkCell}</td>
-      <td><span class="mono" style="font-size:12px" title="${esc(p.allowed_ips.split(',').join('\n'))}">${esc(p.allowed_ips.split(',').slice(0, 2).join(', ')) || '<span class="chip bad">none</span>'}${p.allowed_ips.split(',').length > 2 ? '…' : ''}</span></td>
+      <td>${p.auth_type === 'password' ? `<span class="chip">user</span> <span class="mono" style="font-size:12px">${esc(p.sip_username)}</span>`
+        : `<span class="mono" style="font-size:12px" title="${esc(p.allowed_ips.split(',').join('\n'))}">${esc(p.allowed_ips.split(',').slice(0, 2).join(', ')) || '<span class="chip bad">none</span>'}${p.allowed_ips.split(',').length > 2 ? '…' : ''}</span>`}</td>
       <td>${usage(L.live, p.channel_limit)}</td>
       <td><div class="dirs">${dirChip('OUT', p.allow_outbound !== false, p.out_hours)}${dirChip('IN', p.allow_inbound !== false, p.in_hours)}</div></td>
       <td class="mono" style="font-size:12.5px;white-space:nowrap">${esc(p.dummy_cli)}</td>
@@ -494,7 +495,7 @@ async function loadProcs() {
   }));
   $$('[data-del]', body).forEach((b) => (b.onclick = async () => {
     const p = find(b, 'del');
-    if (!(await confirmBox('Delete process', `Delete <b>${esc(p.name)}</b> (${esc(p.code)})? Calls from its IPs are rejected at once and its DIDs become free. Call history is kept.`))) return;
+    if (!(await confirmBox('Delete process', `Delete <b>${esc(p.name)}</b> (${esc(p.code)})? Its calls are rejected at once and its DIDs become free. Call history is kept.`))) return;
     try { applyToast(await api('DELETE', `/api/processes/${p.id}`), 'Process'); loadProcs(); } catch (e) { toast(e.message, true); }
   }));
 }
@@ -512,7 +513,8 @@ function limitForm(p) {
 }
 async function procForm(p) {
   const sug = await api('GET', '/api/processes/suggest');
-  const v = p || { channel_limit: 10, dummy_cli: sug.dummy_cli, active: true, allowed_ips: '', allow_outbound: true, allow_inbound: true };
+  const v = p || { channel_limit: 10, dummy_cli: sug.dummy_cli, active: true, auth_type: 'ip', allowed_ips: '', allow_outbound: true, allow_inbound: true };
+  const byPass = v.auth_type === 'password';
   const trunkOpts = `<option value="">— no trunk (calls rejected) —</option>` + S.trunks.map((t) =>
     `<option value="${t.id}" ${v.trunk_id === t.id ? 'selected' : ''}>${esc(t.name)} · ${t.max_channels || '∞'} ch${t.active ? '' : ' (inactive)'}</option>`).join('');
   openModal(p ? `Edit process ${p.name}` : 'Add process', `<form id="pf"><div class="fgrid">
@@ -522,7 +524,13 @@ async function procForm(p) {
     <label>Channel limit <small>max concurrent calls for this customer</small><input name="channel_limit" type="number" min="1" value="${v.channel_limit}" required></label>
     <p class="hint full" id="capHint"></p>
     <div class="fsec">Customer server</div>
-    <label class="full">Customer server IPs <small>calls are accepted only from these IPs · comma separated, CIDR allowed · each IP belongs to one process · the first single IP receives inbound DID calls</small><input name="allowed_ips" value="${esc(v.allowed_ips || '')}" placeholder="203.0.113.25, 198.51.100.0/28" class="mono" required></label>
+    <label class="full">Authentication<select name="auth_type">
+      <option value="ip" ${byPass ? '' : 'selected'}>By server IP — calls accepted only from the customer's IPs</option>
+      <option value="password" ${byPass ? 'selected' : ''}>Username + password — the customer registers / authenticates (any IP)</option></select></label>
+    <label class="full a-ip">Customer server IPs <small>calls are accepted only from these IPs · comma separated, CIDR allowed · each IP belongs to one process · the first single IP receives inbound DID calls</small><input name="allowed_ips" value="${esc(v.allowed_ips || '')}" placeholder="203.0.113.25, 198.51.100.0/28" class="mono"></label>
+    <label class="a-pw">SIP username <small>blank = process code</small><input name="sip_username" value="${esc(v.sip_username || '')}" class="mono" pattern="[A-Za-z0-9_.\\-]{2,64}" autocomplete="off"></label>
+    <label class="a-pw">SIP password <small>${p && p.sip_password ? 'leave as is to keep current' : '8+ chars, no spaces'}</small><div class="row"><input name="sip_password" value="${esc(v.sip_password || sug.sip_password)}" class="mono" minlength="8" autocomplete="new-password"><button type="button" class="btn" id="sugPw">Generate</button></div></label>
+    <p class="hint full a-pw">Inbound DID calls go to wherever the customer is currently registered — their Asterisk must REGISTER to this server to receive them.</p>
     <div class="fsec">Calls allowed</div>
     ${dirBlock('out', 'Outbound calls', '— customer → carrier trunk', v.allow_outbound !== false, v.out_hours)}
     ${dirBlock('in', 'Inbound DID calls', '— carrier trunk → customer', v.allow_inbound !== false, v.in_hours)}
@@ -536,6 +544,9 @@ async function procForm(p) {
   (c) => {
     const f = $('#pf', c);
     const sync = () => {
+      const pw = f.auth_type.value === 'password';
+      $$('.a-ip', c).forEach((x) => x.classList.toggle('hidden', pw)); $$('.a-pw', c).forEach((x) => x.classList.toggle('hidden', !pw));
+      f.allowed_ips.required = !pw; f.sip_password.required = pw;
       $$('.dirbox', c).forEach((b) => {
         const allow = $('.d-allow', b).checked, timed = $('.d-timed', b).checked;
         $('.d-sub', b).classList.toggle('hidden', !allow); $('.d-hours', b).classList.toggle('hidden', !timed);
@@ -621,6 +632,7 @@ async function procForm(p) {
     };
     f.trunk_id.addEventListener('change', drawDids); drawDids();
     $('#sugCli', c).onclick = async () => { f.dummy_cli.value = (await api('GET', '/api/processes/suggest')).dummy_cli; };
+    $('#sugPw', c).onclick = async () => { f.sip_password.value = (await api('GET', '/api/processes/suggest')).sip_password; };
     f.addEventListener('submit', async (e) => {
       e.preventDefault();
       const d = formData(f); d.active = f.active.checked;
