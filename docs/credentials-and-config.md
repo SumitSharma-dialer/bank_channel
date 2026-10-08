@@ -38,7 +38,7 @@ Loaded by Node with `--env-file=/opt/sipdist/.env` (see `deploy/sipdist.service`
 | `HTTP_PORT` | `3000` | UI/API port; also used in the dialplan CURL URL | no (live uses `PORT`, ignored — default applies) |
 | `SESSION_SECRET` | `dev-secret-change-me` | cookie signing | **no** (live has `JWT_SECRET`, which is ignored) |
 | `ADMIN_PASSWORD` | random | first admin only | no (live has `ADMIN_PASS`, ignored) |
-| `PUBLIC_IP` | `127.0.0.1` | shown in UI + customer peer config | yes (`172.20.10.201`) |
+| `PUBLIC_IP` | `127.0.0.1` | shown in UI + customer peer config (the address customers send SIP / register to), alert links | yes (`182.95.69.226`, the public NAT address — was the private `172.20.10.201` until 2026-10-08, which internet customers cannot reach) |
 | `SIP_PORT` | `5060` | customer peer config | no (default) |
 | `ARI_URL` | `http://127.0.0.1:8088` | ARI | yes |
 | `ARI_USER` / `ARI_PASS` | `channel_ari` / empty | ARI login | yes |
@@ -59,7 +59,7 @@ A correct `.env` for the current code (values replaced by placeholders):
 HTTP_HOST=0.0.0.0
 HTTP_PORT=3000
 SESSION_SECRET=<random 32+ chars>
-PUBLIC_IP=172.20.10.201
+PUBLIC_IP=182.95.69.226
 SIP_PORT=5060
 ARI_URL=http://127.0.0.1:8088
 ARI_USER=sipdist

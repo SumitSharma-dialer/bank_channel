@@ -49,7 +49,7 @@ Tuning in place (2026-10-08, files in `deploy/`, installed by `setup.sh`):
 | Kernel backlog | `netdev_max_backlog=10000` | same |
 | Ephemeral ports | 32768–60999 (kept above the RTP range) | same |
 
-Firewall: UDP **10000–30000** (RTP) and UDP/TCP 5060 (SIP) must be open from carriers and customers. `ufw` is off
+Firewall: UDP **10000–30000** (RTP) and UDP/TCP 5060 (SIP) must be open from carriers and customers, and forwarded from the public IP (see [Public IP and NAT](#public-ip-and-nat)). `ufw` is off
 on this server; check any firewall in front of it. Check the limits Asterisk really runs with:
 
 ```bash
@@ -60,6 +60,28 @@ asterisk -rx 'rtp show settings' | grep Port
 
 Changing the systemd limits or `maxfiles` needs `systemctl daemon-reload && systemctl restart asterisk`, which drops live
 calls. Do it when `asterisk -rx 'core show channels count'` shows 0. `rtp.conf` changes: `asterisk -rx 'module reload res_rtp_asterisk.so'`.
+
+## Public IP and NAT
+
+The server has the private address `172.20.10.201` (LAN `172.20.10.192/27`, gateway `.193`) and reaches the internet as
+**`182.95.69.226`** (checked 2026-10-08). Customers and carriers on the internet must use the public address.
+
+| Piece | Setting | Why |
+|---|---|---|
+| Router / firewall | forward **UDP+TCP 5060** and **UDP 10000–30000** on 182.95.69.226 → 172.20.10.201 | without it nothing from the internet reaches Asterisk: customers cannot register or call (they show **offline**) |
+| `.env` | `PUBLIC_IP=182.95.69.226` | the Peer config tells customers to send SIP / register here |
+| `pjsip.conf` `[transport-udp]` / `[transport-tcp]` | `external_signaling_address` and `external_media_address=182.95.69.226`, `local_net` = 127/8, 10/8, 172.16/12, 192.168/16 | Asterisk puts the public address in SIP Contact / Via and SDP for internet peers (else they answer to 172.20.10.201 → no registration, no audio); LAN peers (`local_net`) keep the private one |
+
+Changing the transport lines needs `systemctl restart asterisk` (drops calls). Changing `PUBLIC_IP` needs
+`systemctl restart sipdist`; customers then need the new Peer config.
+
+Check that internet SIP arrives (open SIP ports get scanner traffic within minutes; replies to our own pings don't
+count):
+
+```bash
+tcpdump -ni en01 'udp dst port 5060 and not src net 172.20.10.192/27'          # anything from the internet?
+tcpdump -ni en01 'host <customer ip>'                                           # a customer's REGISTER / INVITE
+```
 
 ## npm scripts (run from `/opt/sipdist`, as `asterisk`)
 
@@ -74,7 +96,7 @@ calls. Do it when `asterisk -rx 'core show channels count'` shows 0. `rtp.conf` 
 ## Installing / upgrading
 
 ```bash
-sudo PUBLIC_IP=172.20.10.201 DB_PASS=… ARI_PASS=… bash deploy/setup.sh               # integrate mode (default)
+sudo PUBLIC_IP=182.95.69.226 DB_PASS=… ARI_PASS=… bash deploy/setup.sh               # integrate mode (default)
 sudo PUBLIC_IP=… EXTERNAL_IP=<NAT ip> ASTERISK_MODE=full bash deploy/setup.sh       # replace Asterisk config
 ```
 

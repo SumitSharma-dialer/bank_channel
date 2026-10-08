@@ -24,7 +24,7 @@ Preview without writing: UI → System → config preview, or `npm run render`.
 
 | File | Change made | Why |
 |---|---|---|
-| `/etc/asterisk/pjsip.conf` (end of file, ~line 1764) | `[transport-udp]` and `[transport-tcp]` on `0.0.0.0:5060` (flat LAN, no NAT lines); `#tryinclude sipdist/trunks.conf`; `#tryinclude sipdist/processes.conf`; `[global] endpoint_identifier_order=ip,auth_username,username,anonymous` | load generated endpoints; identify customers/carriers by IP first |
+| `/etc/asterisk/pjsip.conf` (end of file, ~line 1764) | `[transport-udp]` and `[transport-tcp]` on `0.0.0.0:5060` with NAT lines (by hand, 2026-10-08): `external_signaling_address` / `external_media_address=182.95.69.226`, `local_net` 127/8, 10/8, 172.16/12, 192.168/16 — see [operations.md § Public IP and NAT](operations.md#public-ip-and-nat). Backup before: `/etc/asterisk/backup-nat-20261008-095143/`; `#tryinclude sipdist/trunks.conf`; `#tryinclude sipdist/processes.conf`; `[global] endpoint_identifier_order=ip,auth_username,username,anonymous` | load generated endpoints; identify customers/carriers by IP first |
 | `/etc/asterisk/extensions.conf` (line ~916) | `#tryinclude sipdist/dialplan.conf` | load generated contexts |
 | `/etc/asterisk/modules.conf` | ensures needed modules are not `noload` (stock file has `autoload=yes`) | `res_pjsip_endpoint_identifier_ip`, `app_userevent`, `func_groupcount`, `res_ari*`, … |
 | `/etc/asterisk/ari.conf` (line ~76) | user `[sipdist]`, `type=user`, `read_only=no`, `password_format=plain`, `password=…` | Node backend ARI login — must match `ARI_USER`/`ARI_PASS` in `.env` |

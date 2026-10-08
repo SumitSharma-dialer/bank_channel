@@ -1,7 +1,7 @@
 # SIP Channel Distributor — System Documentation
 
 These documents describe the system as it runs on the live server (checked on 2026-10-07):
-host `172.20.10.201`, app in `/opt/sipdist`, Asterisk 22.5.2 (Debian package), PostgreSQL 18.6, Redis, Node.js.
+host `172.20.10.201` (public `182.95.69.226` via NAT), app in `/opt/sipdist`, Asterisk 22.5.2 (Debian package), PostgreSQL 18.6, Redis, Node.js.
 
 | Document | What it covers |
 |---|---|
