@@ -948,13 +948,13 @@ DiagTab.sip = async (el) => {
   el.innerHTML = `<div class="panel" style="margin-bottom:14px"><form class="filters" id="stf">
       ${targetField()}
       <label>Run for<select name="minutes"><option value="5">5 min</option><option value="10" selected>10 min</option><option value="30">30 min</option><option value="60">60 min</option></select></label>
-      <label class="check" style="max-width:none" title="Live messages always show REGISTER / OPTIONS; this adds them to the Calls list too"><input type="checkbox" name="keepNoise"> REGISTER/OPTIONS in Calls</label>
+      <label class="check" style="max-width:none" title="Live messages always show REGISTER / OPTIONS; this adds them to the Calls list too"><input type="checkbox" name="keepNoise" checked> REGISTER/OPTIONS in Calls</label>
       <div class="actions"><button class="btn primary" id="stGo">Start trace</button><button type="button" class="btn" id="stStop">Stop</button><button type="button" class="btn" id="stClr">Clear</button></div>
     </form><div class="summary" id="stSum"></div>
     <div class="tabs sub" id="stView"><button data-v="live">Live messages <small>INVITE · 100 · 180 · 200 · BYE · REGISTER…</small></button><button data-v="calls">Calls <small>one row per call, like sngrep</small></button></div>
     <div id="vLive">
       <div class="filters live-f">
-        <span class="seg">${[['call', 'Calls (INVITE/ACK/BYE/CANCEL)', 1], ['register', 'REGISTER', 1], ['options', 'OPTIONS', 0], ['other', 'Other', 1]]
+        <span class="seg">${[['call', 'Calls (INVITE/ACK/BYE/CANCEL)', 1], ['register', 'REGISTER', 1], ['options', 'OPTIONS', 1], ['other', 'Other', 1]]
           .map(([v, l, on]) => `<label class="check"><input type="checkbox" class="lt" value="${v}" ${on ? 'checked' : ''}> ${l}</label>`).join('')}</span>
         <label style="max-width:260px">Search<input id="lmQ" class="mono" placeholder="number, Call-ID, IP, any text"></label>
         <span class="seg"><label class="check"><input type="checkbox" id="lmFull"> full text <small>like tcpdump -A</small></label>
