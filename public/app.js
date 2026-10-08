@@ -479,7 +479,9 @@ function regChip(p, st) {
   const c = st.registered[p.code];
   if (!c) return `<span class="chip bad" title="Offline — ${p.active ? 'the customer server has not registered (or its registration expired)' : 'Process inactive'}">offline</span>`;
   const tip = c.map((x) => `${x.ip}${x.port ? ':' + x.port : ''}${x.userAgent ? ' · ' + x.userAgent : ''}${x.expiresIn != null ? ` · expires in ${x.expiresIn}s` : ''}`).join('\n');
-  return `<span class="chip ok" title="Online — registered\n${esc(tip)}">online</span><br><small class="mono">${esc(c[0].ip)}</small>`;
+  const want = +p.sip_port || 5060, other = c.find((x) => x.port && x.port !== want);
+  const note = other ? `\nRegistered from port ${other.port}, the process says ${want} — calls follow the registration (${other.port}).` : '';
+  return `<span class="chip ok" title="Online — registered\n${esc(tip)}${esc(note)}">online</span><br><small class="mono">${esc(c[0].ip)}${c[0].port ? ':' + c[0].port : ''}${other ? ' <b title="differs from the process port">≠ ' + want + '</b>' : ''}</small>`;
 }
 async function loadRegs() {   // refresh only the Registration cells
   const st = await api('GET', '/api/processes/status').catch(() => null);
@@ -496,7 +498,7 @@ async function loadProcs() {
     return `<tr>
       <td class="t-name"><b>${esc(p.name)}</b><small>${esc(p.code)}</small></td>
       <td>${trunkCell}</td>
-      <td>${p.auth_type === 'password' ? `<span class="chip">user</span> <span class="mono" style="font-size:12px">${esc(p.sip_username)}</span>${p.allowed_ips ? `<br><small class="mono" title="${esc(p.allowed_ips.split(',').join('\n'))}">${esc(p.allowed_ips.split(',').slice(0, 2).join(', '))}${p.allowed_ips.split(',').length > 2 ? '…' : ''}</small>` : ''}`
+      <td>${p.auth_type === 'password' ? `<span class="chip">user</span> <span class="mono" style="font-size:12px">${esc(p.sip_username)}</span>${p.allowed_ips ? `<br><small class="mono" title="${esc(p.allowed_ips.split(',').join('\n'))}">${esc(p.allowed_ips.split(',').slice(0, 2).join(', '))}${p.allowed_ips.split(',').length > 2 ? '…' : ''}</small>` : ''}<br><small class="mono">port ${+p.sip_port || 5060}</small>`
         : `<span class="mono" style="font-size:12px" title="${esc(p.allowed_ips.split(',').join('\n'))}">${esc(p.allowed_ips.split(',').slice(0, 2).join(', ')) || '<span class="chip bad">none</span>'}${p.allowed_ips.split(',').length > 2 ? '…' : ''}</span><br><small class="mono">port ${+p.sip_port || 5060}</small>`}</td>
       <td id="reg-${p.id}">${regChip(p, reg)}</td>
       <td>${usage(L.live, p.channel_limit)}</td>
@@ -556,7 +558,7 @@ async function procForm(p) {
       <option value="ip" ${byPass ? '' : 'selected'}>By server IP — calls accepted only from the customer's IPs</option>
       <option value="password" ${byPass ? 'selected' : ''}>Username + password — the customer registers / authenticates (any IP)</option></select></label>
     <label class="full">Customer server IPs <small class="a-ip">calls are accepted only from these IPs · comma separated, CIDR allowed · each IP belongs to one process · the first single IP receives inbound DID calls</small><small class="a-pw">optional · if set, the username is accepted only from these IPs · comma separated, CIDR allowed · blank = any IP</small><input name="allowed_ips" value="${esc(v.allowed_ips || '')}" placeholder="203.0.113.25, 198.51.100.0/28" class="mono"></label>
-    <label class="a-ip">Customer SIP port <small>where inbound DID calls and the online check are sent · usually 5060</small><input name="sip_port" type="number" min="1" max="65535" value="${v.sip_port || 5060}" class="mono"></label>
+    <label>Customer SIP port <small class="a-ip">where inbound DID calls and the online check are sent · usually 5060</small><small class="a-pw">the port the customer server registers from · usually 5060 · calls follow the registration</small><input name="sip_port" type="number" min="1" max="65535" value="${v.sip_port || 5060}" class="mono"></label>
     <label class="a-pw">SIP username <small>blank = process code</small><input name="sip_username" value="${esc(v.sip_username || '')}" class="mono" pattern="[A-Za-z0-9_.\\-]{2,64}" autocomplete="off"></label>
     <label class="a-pw">SIP password <small>${p && p.sip_password ? 'leave as is to keep current' : '8+ chars, no spaces'}</small><div class="row"><input name="sip_password" value="${esc(v.sip_password || sug.sip_password)}" class="mono" minlength="8" autocomplete="new-password"><button type="button" class="btn" id="sugPw">Generate</button></div></label>
     <p class="hint full a-pw">Inbound DID calls go to wherever the customer is currently registered — their Asterisk must REGISTER to this server to receive them.</p>
