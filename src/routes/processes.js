@@ -1,6 +1,7 @@
 'use strict';
 const router = require('express').Router();
 const cfg = require('../config');
+const { execFile } = require('child_process');
 const { q, pool, audit } = require('../db');
 const { apply } = require('../asterisk/apply');
 const { peerConfig } = require('../asterisk/render');
@@ -216,13 +217,28 @@ router.get('/:id/header-log', wrap(async (req, res) => {
   res.json(rows);
 }));
 
+// Which of our addresses the customer should point at. Customer IPs all private (RFC 1918) -> our own source address
+// on the route towards them (`ip route get`), e.g. 172.20.10.201 on the LAN or 10.55.118.18 on a carrier link;
+// otherwise, or with no IPs set (password auth from anywhere), the public IP. ?via=public|private overrides.
+const PRIVATE_RE = /^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|127\.)/;
+const srcFor = (ip) => new Promise((resolve) => {
+  execFile('ip', ['-o', 'route', 'get', ip], { timeout: 2000 }, (err, out) => resolve(err ? null : (/\bsrc (\d+\.\d+\.\d+\.\d+)/.exec(out) || [])[1] || null));
+});
+async function serverAddress(p, via) {
+  const ips = String(p.allowed_ips || '').split(/[\s,]+/).map((x) => x.split('/')[0]).filter((x) => IP_RE.test(x));
+  const privateIp = ips.length && ips.every((x) => PRIVATE_RE.test(x)) ? await srcFor(ips[0]) : null;
+  const usePrivate = via === 'private' ? !!privateIp : via === 'public' ? false : !!privateIp;
+  return { server: usePrivate ? privateIp : cfg.publicIp, via: usePrivate ? 'private' : 'public', privateIp };
+}
+
 router.get('/:id/peer-config', wrap(async (req, res) => {
   const id = int(req.params.id, { min: 1 });
   const p = (await q('SELECT * FROM processes WHERE id=$1', [id])).rows[0];
   if (!p) return res.status(404).json({ error: 'not found' });
   const dids = (await q(`SELECT CASE WHEN first_did=last_did THEN first_did ELSE first_did||'-'||last_did END AS d
     FROM trunk_did_ranges WHERE process_id=$1 ORDER BY first_did`, [id])).rows.map((r) => r.d);
-  res.json({ ...peerConfig(p, cfg.publicIp, cfg.sipPort, dids), dids, publicIp: cfg.publicIp, port: cfg.sipPort,
+  const addr = await serverAddress(p, req.query.via);
+  res.json({ ...peerConfig(p, addr.server, cfg.sipPort, dids), dids, ...addr, publicIp: cfg.publicIp, port: cfg.sipPort,
     username: p.sip_username, password: p.sip_password, auth_type: p.auth_type, limit: p.channel_limit });
 }));
 

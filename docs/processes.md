@@ -77,9 +77,13 @@ gets 401) and has no dialplan.
 ### Offline — what to check
 
 - **First, for any customer on the internet:** this server is behind NAT. The customer must send to the public IP
-  `182.95.69.226:5060` (what Peer config shows), and the router must forward UDP 5060 + 10000–30000 to `172.20.10.201`.
+  `182.95.69.226:5060` (what Peer config shows for public customers), and the router must forward UDP 5060 + 10000–30000 to `172.20.10.201`.
   `tcpdump -ni en01 'host <customer ip>'` shows nothing at all → the packets don't reach us (router / customer config).
   See [operations.md § Public IP and NAT](operations.md#public-ip-and-nat).
+- **Private network customers:** when every customer IP of the process is private (10/8, 172.16/12, 192.168/16),
+  Peer config shows our own address on the route towards them (`ip route get <customer ip>` → `src`, e.g.
+  `172.20.10.201`) instead of the public IP. The Private / Public switch at the top of Peer config changes it
+  (`GET /api/processes/:id/peer-config?via=private|public`). No IPs set → always public.
 - **Password auth:** the customer's server must register. The Peer config includes the registration
   (`[sipdist-reg] type=registration` for PJSIP, `register =>` for chan_sip). Wrong username / password → Diagnostics →
   Registrations → **Trace REGISTER** shows the 401 / 403. IP lock set → the customer must register from one of those IPs.

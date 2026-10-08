@@ -684,12 +684,14 @@ async function procForm(p) {
     });
   });
 }
-async function peerConfig(p) {
-  const c = await api('GET', `/api/processes/${p.id}/peer-config`);
+async function peerConfig(p, via) {
+  const c = await api('GET', `/api/processes/${p.id}/peer-config${via ? `?via=${via}` : ''}`);
+  // private customer network -> our private IP; switch to the public IP if the customer reaches us over the internet
+  const viaSw = c.privateIp ? `<div class="tabs" style="margin:0 0 10px"><button data-via="private" class="${c.via === 'private' ? 'on' : ''}">Private ${esc(c.privateIp)}</button><button data-via="public" class="${c.via === 'public' ? 'on' : ''}">Public ${esc(c.publicIp)}</button></div>` : '';
   openModal(`Peer config · ${p.name}`, `<div class="mbody">
     <p class="hint" style="margin-bottom:12px">Give these details to the customer. They point their Asterisk at your server; calls over ${c.limit} at once get <b>503</b>.</p>
-    <div class="cred">
-      <span>Server</span><code>${esc(c.publicIp)}:${c.port}</code><button class="btn sm" data-copy="${esc(c.publicIp)}">Copy</button>
+    ${viaSw}<div class="cred">
+      <span>Server</span><code>${esc(c.server)}:${c.port}</code><button class="btn sm" data-copy="${esc(c.server)}">Copy</button>
       ${c.auth_type === 'password' ? `<span>Username</span><code>${esc(c.username)}</code><button class="btn sm" data-copy="${esc(c.username)}">Copy</button>
       <span>Password</span><code>${esc(c.password)}</code><button class="btn sm" data-copy="${esc(c.password)}">Copy</button>` : `<span>Auth</span><code>by IP: ${esc(p.allowed_ips)}</code><span></span>`}
       <span>Channels</span><code>${c.limit}</code><span></span>
@@ -703,11 +705,12 @@ async function peerConfig(p) {
     const show = () => { $('#peerCode').textContent = c[tab]; $$('.tabs button', card).forEach((b) => b.classList.toggle('on', b.dataset.tab === tab)); };
     $$('.tabs button', card).forEach((b) => (b.onclick = () => { tab = b.dataset.tab; show(); })); show();
     $$('[data-copy]', card).forEach((b) => (b.onclick = () => copy(b.dataset.copy)));
+    $$('[data-via]', card).forEach((b) => (b.onclick = () => peerConfig(p, b.dataset.via)));
     $('#copyCfg', card).onclick = () => copy(c[tab]);
     const rg = $('#regen', card);
     if (rg) rg.onclick = async () => {
       if (!(await confirmBox('Regenerate password', 'The customer must update their config — their calls fail until they do.', 'Regenerate'))) return;
-      try { applyToast(await api('POST', `/api/processes/${p.id}/regenerate`), 'Password'); await loadProcs(); peerConfig(p); } catch (e) { toast(e.message, true); }
+      try { applyToast(await api('POST', `/api/processes/${p.id}/regenerate`), 'Password'); await loadProcs(); peerConfig(p, c.via); } catch (e) { toast(e.message, true); }
     };
   });
 }
