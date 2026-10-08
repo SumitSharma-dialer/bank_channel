@@ -155,6 +155,17 @@ chown -R asterisk:asterisk "$APP"; chmod 600 "$APP/.env"
 say "Creating tables"
 sudo -u asterisk node --env-file="$APP/.env" "$APP/src/cli/dbinit.js"
 
+say "Raising Asterisk open-file / thread limits and UDP buffers (for many concurrent calls)"
+mkdir -p /etc/systemd/system/asterisk.service.d
+cp "$SRC/deploy/asterisk-limits.conf" /etc/systemd/system/asterisk.service.d/sipdist-limits.conf
+cp "$SRC/deploy/sysctl-sipdist.conf" /etc/sysctl.d/90-sipdist.conf
+sysctl -q -p /etc/sysctl.d/90-sipdist.conf || true
+systemctl daemon-reload
+if [[ ${ASTERISK_MODE:-integrate} != full ]]; then
+  grep -q '^rtpend=30000' "$AST/rtp.conf" || echo "  NOTE: for >2500 calls set rtpstart=10000 rtpend=30000 in $AST/rtp.conf"
+  echo "  NOTE: the new limits apply after 'systemctl restart asterisk' (drops live calls — do it when idle)"
+fi
+
 if [[ ${ASTERISK_MODE:-integrate} == full ]]; then
 say "Restarting Asterisk with the lightweight module set"
 systemctl restart asterisk
