@@ -117,4 +117,15 @@ async function collect(traceLog) {
   return { at: now, rows };
 }
 
-module.exports = { collect, parseRegistrations, parseRegistrar, lastLogLine, lastPacket };
+// cheap per-process view for the Processes page: code -> live (not expired) registered contacts
+async function registered() {
+  const now = Date.now(), out = {};
+  for (const [code, list] of Object.entries(parseRegistrar(await cli('database show registrar')))) {
+    const live = list.map(({ ip, port, userAgent, expiresAt }) => ({ ip, port, userAgent, expiresIn: expiresAt ? Math.round((expiresAt - now) / 1000) : null }))
+      .filter((c) => c.expiresIn == null || c.expiresIn > 0);
+    if (live.length) out[code] = live;
+  }
+  return out;
+}
+
+module.exports = { collect, registered, parseRegistrations, parseRegistrar, lastLogLine, lastPacket };

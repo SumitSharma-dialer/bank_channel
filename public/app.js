@@ -454,13 +454,29 @@ function dirBlock(dir, title, desc, allowed, h) {
 PAGES.processes = async (main) => {
   main.innerHTML = `<div class="head"><div><h1>Processes</h1></div>
     <div class="actions"><button class="btn primary" id="addProc">+ Add process</button></div></div>
-    <div class="panel"><div class="tw"><table><thead><tr><th>Process</th><th>Trunk</th><th>Customer auth</th><th>Live / limit</th><th>Calls allowed</th><th>Dummy number</th><th class="r">DIDs assigned</th><th>Status</th><th></th></tr></thead><tbody id="pBody"><tr><td colspan="9" class="empty">Loading…</td></tr></tbody></table></div></div>`;
+    <div class="panel"><div class="tw"><table><thead><tr><th>Process</th><th>Trunk</th><th>Customer auth</th><th>Registration</th><th>Live / limit</th><th>Calls allowed</th><th>Dummy number</th><th class="r">DIDs assigned</th><th>Status</th><th></th></tr></thead><tbody id="pBody"><tr><td colspan="10" class="empty">Loading…</td></tr></tbody></table></div></div>`;
   $('#addProc').onclick = async () => { if (!S.trunks.length) S.trunks = await api('GET', '/api/trunks'); procForm(); };
   [S.trunks] = await Promise.all([api('GET', '/api/trunks')]);
   await loadProcs();
+  clearInterval(S.regTimer);   // registration status every 15 s while this page is open
+  S.regTimer = setInterval(() => { if (S.page !== 'processes') clearInterval(S.regTimer); else if (!document.hidden) loadRegs(); }, 15000);
 };
+// green = customer registered to us, red = not registered (password auth); IP auth doesn't register
+function regChip(p, reg) {
+  if (p.auth_type !== 'password') return '<span class="chip" title="Identified by IP — the customer does not register">IP auth</span>';
+  if (!reg) return '<span class="chip">?</span>';
+  const c = reg[p.code];
+  if (!c) return `<span class="chip bad" title="${p.active ? 'The customer server has not registered (or its registration expired)' : 'Process inactive'}">not registered</span>`;
+  const tip = c.map((x) => `${x.ip}${x.port ? ':' + x.port : ''}${x.userAgent ? ' · ' + x.userAgent : ''}${x.expiresIn != null ? ` · expires in ${x.expiresIn}s` : ''}`).join('\n');
+  return `<span class="chip ok" title="${esc(tip)}">registered</span><br><small class="mono">${esc(c[0].ip)}</small>`;
+}
+async function loadRegs() {   // refresh only the Registration cells
+  const reg = await api('GET', '/api/processes/registrations').catch(() => null);
+  for (const p of S.processes || []) { const td = $(`#reg-${p.id}`); if (td) td.innerHTML = regChip(p, reg); }
+}
 async function loadProcs() {
-  S.processes = await api('GET', '/api/processes');
+  let reg;
+  [S.processes, reg] = await Promise.all([api('GET', '/api/processes'), api('GET', '/api/processes/registrations').catch(() => null)]);
   const live = Object.fromEntries((S.snap?.processes || []).map((p) => [p.code, p]));
   const body = $('#pBody'); if (!body) return;
   body.innerHTML = S.processes.length ? S.processes.map((p) => {
@@ -471,6 +487,7 @@ async function loadProcs() {
       <td>${trunkCell}</td>
       <td>${p.auth_type === 'password' ? `<span class="chip">user</span> <span class="mono" style="font-size:12px">${esc(p.sip_username)}</span>${p.allowed_ips ? `<br><small class="mono" title="${esc(p.allowed_ips.split(',').join('\n'))}">${esc(p.allowed_ips.split(',').slice(0, 2).join(', '))}${p.allowed_ips.split(',').length > 2 ? '…' : ''}</small>` : ''}`
         : `<span class="mono" style="font-size:12px" title="${esc(p.allowed_ips.split(',').join('\n'))}">${esc(p.allowed_ips.split(',').slice(0, 2).join(', ')) || '<span class="chip bad">none</span>'}${p.allowed_ips.split(',').length > 2 ? '…' : ''}</span>`}</td>
+      <td id="reg-${p.id}">${regChip(p, reg)}</td>
       <td>${usage(L.live, p.channel_limit)}</td>
       <td><div class="dirs">${dirChip('OUT', p.allow_outbound !== false, p.out_hours)}${dirChip('IN', p.allow_inbound !== false, p.in_hours)}</div></td>
       <td class="mono" style="font-size:12.5px;white-space:nowrap">${esc(p.dummy_cli)}</td>
@@ -483,7 +500,7 @@ async function loadProcs() {
         <button class="btn sm" data-edit="${p.id}">Edit</button>
         <button class="btn sm" data-toggle="${p.id}">${p.active ? 'Deactivate' : 'Activate'}</button>
         <button class="btn sm danger" data-del="${p.id}">Delete</button></div></td></tr>`;
-  }).join('') : `<tr><td colspan="9" class="empty">No processes yet. Each customer Asterisk that sends you calls is a process.</td></tr>`;
+  }).join('') : `<tr><td colspan="10" class="empty">No processes yet. Each customer Asterisk that sends you calls is a process.</td></tr>`;
   const find = (b, k) => S.processes.find((x) => x.id === +b.dataset[k]);
   $$('[data-edit]', body).forEach((b) => (b.onclick = () => procForm(find(b, 'edit'))));
   $$('[data-peer]', body).forEach((b) => (b.onclick = () => peerConfig(find(b, 'peer'))));

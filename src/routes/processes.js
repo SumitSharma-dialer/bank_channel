@@ -189,6 +189,11 @@ router.get('/suggest', wrap(async (req, res) => {
   res.json({ dummy_cli: suggestCli(), sip_password: genPassword() });
 }));
 
+// code -> contacts the customer registered from (password-auth processes); missing = not registered
+router.get('/registrations', wrap(async (req, res) => {
+  res.json(await require('../diag/reg').registered());
+}));
+
 router.get('/', wrap(async (req, res) => {
   const { rows } = await q(`SELECT p.*, t.name AS trunk_name, t.active AS trunk_active, t.max_channels AS trunk_max,
       (SELECT coalesce(json_agg(CASE WHEN r.first_did=r.last_did THEN r.first_did ELSE r.first_did||'-'||r.last_did END ORDER BY r.first_did),'[]')
