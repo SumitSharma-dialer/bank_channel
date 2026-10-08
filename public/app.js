@@ -454,29 +454,40 @@ function dirBlock(dir, title, desc, allowed, h) {
 PAGES.processes = async (main) => {
   main.innerHTML = `<div class="head"><div><h1>Processes</h1></div>
     <div class="actions"><button class="btn primary" id="addProc">+ Add process</button></div></div>
-    <div class="panel"><div class="tw"><table><thead><tr><th>Process</th><th>Trunk</th><th>Customer auth</th><th>Registration</th><th>Live / limit</th><th>Calls allowed</th><th>Dummy number</th><th class="r">DIDs assigned</th><th>Status</th><th></th></tr></thead><tbody id="pBody"><tr><td colspan="10" class="empty">Loading…</td></tr></tbody></table></div></div>`;
+    <div class="panel"><div class="tw"><table><thead><tr><th>Process</th><th>Trunk</th><th>Customer auth</th><th>Connection</th><th>Live / limit</th><th>Calls allowed</th><th>Dummy number</th><th class="r">DIDs assigned</th><th>Status</th><th></th></tr></thead><tbody id="pBody"><tr><td colspan="10" class="empty">Loading…</td></tr></tbody></table></div></div>`;
   $('#addProc').onclick = async () => { if (!S.trunks.length) S.trunks = await api('GET', '/api/trunks'); procForm(); };
   [S.trunks] = await Promise.all([api('GET', '/api/trunks')]);
   await loadProcs();
-  clearInterval(S.regTimer);   // registration status every 15 s while this page is open
+  clearInterval(S.regTimer);   // connection status every 15 s while this page is open
   S.regTimer = setInterval(() => { if (S.page !== 'processes') clearInterval(S.regTimer); else if (!document.hidden) loadRegs(); }, 15000);
 };
-// green = customer registered to us, red = not registered (password auth); IP auth doesn't register
-function regChip(p, reg) {
-  if (p.auth_type !== 'password') return '<span class="chip" title="Identified by IP — the customer does not register">IP auth</span>';
-  if (!reg) return '<span class="chip">?</span>';
-  const c = reg[p.code];
+// password auth: green = registered to us, red = not registered
+// IP auth: green = customer server answers our OPTIONS ping (every 60 s), red = no answer
+function regChip(p, st) {
+  if (!st) return '<span class="chip">?</span>';
+  if (p.auth_type !== 'password') {
+    const fixed = p.allowed_ips.split(',').filter((x) => x && !x.includes('/'));
+    if (!p.active) return '<span class="chip">inactive</span>';
+    if (!fixed.length) return '<span class="chip" title="Only IP ranges (CIDR) are set — there is no single IP to ping">IP range</span>';
+    const r = st.reachable[p.code] || [];
+    const tip = r.map((x) => `${x.ip}: ${x.status === 'Avail' ? `reachable${x.rtt != null ? ` · ${x.rtt} ms` : ''}` : x.status === 'Unavail' ? 'no answer to OPTIONS ping' : 'not checked yet'}`).join('\n');
+    const up = r.filter((x) => x.status === 'Avail');
+    if (up.length) return `<span class="chip ok" title="${esc(tip)}">reachable</span><br><small class="mono">${esc(up[0].ip)}${up[0].rtt != null ? ` · ${up[0].rtt} ms` : ''}</small>`;
+    if (r.some((x) => x.status === 'Unavail')) return `<span class="chip bad" title="${esc(tip)}\nThe customer server does not answer SIP OPTIONS (down, firewall, or it ignores OPTIONS). Calls are not affected by this check.">unreachable</span>`;
+    return `<span class="chip" title="Asterisk pings every 60 s — wait a minute">checking…</span>`;
+  }
+  const c = st.registered[p.code];
   if (!c) return `<span class="chip bad" title="${p.active ? 'The customer server has not registered (or its registration expired)' : 'Process inactive'}">not registered</span>`;
   const tip = c.map((x) => `${x.ip}${x.port ? ':' + x.port : ''}${x.userAgent ? ' · ' + x.userAgent : ''}${x.expiresIn != null ? ` · expires in ${x.expiresIn}s` : ''}`).join('\n');
   return `<span class="chip ok" title="${esc(tip)}">registered</span><br><small class="mono">${esc(c[0].ip)}</small>`;
 }
 async function loadRegs() {   // refresh only the Registration cells
-  const reg = await api('GET', '/api/processes/registrations').catch(() => null);
-  for (const p of S.processes || []) { const td = $(`#reg-${p.id}`); if (td) td.innerHTML = regChip(p, reg); }
+  const st = await api('GET', '/api/processes/status').catch(() => null);
+  for (const p of S.processes || []) { const td = $(`#reg-${p.id}`); if (td) td.innerHTML = regChip(p, st); }
 }
 async function loadProcs() {
   let reg;
-  [S.processes, reg] = await Promise.all([api('GET', '/api/processes'), api('GET', '/api/processes/registrations').catch(() => null)]);
+  [S.processes, reg] = await Promise.all([api('GET', '/api/processes'), api('GET', '/api/processes/status').catch(() => null)]);
   const live = Object.fromEntries((S.snap?.processes || []).map((p) => [p.code, p]));
   const body = $('#pBody'); if (!body) return;
   body.innerHTML = S.processes.length ? S.processes.map((p) => {

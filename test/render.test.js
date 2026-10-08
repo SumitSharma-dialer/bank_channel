@@ -32,6 +32,16 @@ test('password process with IPs is locked to them, without identify by IP', () =
   assert.ok(!renderProcesses([proc]).includes('deny='), 'no IPs = any IP');
 });
 
+test('active ip process gets a monitor-only AOR + endpoint that pings fixed IPs but is never identified', () => {
+  const p = renderProcesses([{ ...proc, auth_type: 'ip', allowed_ips: '1.2.3.4,5.6.7.0/24' }]);
+  assert.ok(p.includes('[p_acme-mon]\ntype=aor\ncontact=sip:1.2.3.4:5060\nqualify_frequency=60'));
+  assert.ok(!/p_acme-mon[^]*5\.6\.7\.0/.test(p.split('[p_acme]\ntype=endpoint')[0].split('[p_acme-mon]\ntype=aor')[1] || ''), 'no CIDR in monitor');
+  assert.ok(p.includes('aors=p_acme-mon\nidentify_by=ip\n') && !p.includes('endpoint=p_acme-mon'));
+  assert.ok(!p.includes('qualify_frequency=60\n\n[p_acme]\ntype=aor'), 'the dialed AOR is not qualified');
+  assert.ok(!renderProcesses([{ ...proc, auth_type: 'ip', allowed_ips: '1.2.3.4', active: false }]).includes('-mon]'));
+  assert.ok(!renderProcesses([proc]).includes('-mon]'), 'password process: none');
+});
+
 test('ip process renders identify with every IP', () => {
   const p = renderProcesses([{ ...proc, auth_type: 'ip', allowed_ips: '1.2.3.4,5.6.7.0/24' }]);
   assert.ok(p.includes('match=1.2.3.4') && p.includes('match=5.6.7.0/24') && !p.includes('-auth]'));

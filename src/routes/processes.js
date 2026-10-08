@@ -189,9 +189,10 @@ router.get('/suggest', wrap(async (req, res) => {
   res.json({ dummy_cli: suggestCli(), sip_password: genPassword() });
 }));
 
-// code -> contacts the customer registered from (password-auth processes); missing = not registered
-router.get('/registrations', wrap(async (req, res) => {
-  res.json(await require('../diag/reg').registered());
+// registered: code -> contacts the customer registered from (password auth; missing = not registered)
+// reachable:  code -> OPTIONS ping result per fixed IP (IP auth)
+router.get('/status', wrap(async (req, res) => {
+  res.json(await require('../diag/reg').status());
 }));
 
 router.get('/', wrap(async (req, res) => {

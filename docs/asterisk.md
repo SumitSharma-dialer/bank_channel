@@ -13,7 +13,7 @@
 | File | Written by | Content | Reloaded with |
 |---|---|---|---|
 | `/etc/asterisk/sipdist/trunks.conf` | `renderTrunks()` | per active trunk: `[t_<name>]` aor, `[t_<name>-auth]` (if user/pass), `[t_<name>]` endpoint, `[t_<name>-identify]`, `[t_<name>-reg]` (if register) | `res_pjsip.so`, `res_pjsip_outbound_registration.so` |
-| `/etc/asterisk/sipdist/processes.conf` | `renderProcesses()` | per process: `[p_<code>]` aor (first fixed IP), endpoint, `[p_<code>-identify]` with `match=` per allowed IP (password auth: `-auth` section, plus `deny`/`permit` on the endpoint if IPs are set) | `res_pjsip.so` |
+| `/etc/asterisk/sipdist/processes.conf` | `renderProcesses()` | per process: `[p_<code>]` aor (first fixed IP), endpoint, `[p_<code>-identify]` with `match=` per allowed IP (password auth: `-auth` section, plus `deny`/`permit` on the endpoint if IPs are set). Active IP processes also get a monitor-only `[p_<code>-mon]` AOR + endpoint: `qualify_frequency=60` OPTIONS ping to each fixed IP for the Processes page Connection column. It is separate from `[p_<code>]` because Asterisk skips `Unavail` contacts when dialing, so a customer that ignores OPTIONS still gets inbound calls; it is never identified (`identify_by=ip`, no identify section; a request naming it gets 401) and its context `sd-none` does not exist | `res_pjsip.so` |
 | `/etc/asterisk/sipdist/dialplan.conf` | `renderDialplan()` | `[sd-hangup]`, `[sd-inhdr]`, `[sd-from-trunk]`, `[proc-<code>]`, `[sd-cli-<trunk>]`, `[sd-didok-<trunk>]`, `[sd-in-<trunk>]` | `pbx_config.so` |
 
 Directory: owner `asterisk:asterisk`, mode `2750`; files mode `0640`. The systemd unit allows writes only to this
@@ -50,7 +50,7 @@ by setup.sh with `sed`.
 | Object | Asterisk name |
 |---|---|
 | Trunk `<name>` | endpoint/aor `t_<name>`, auth `t_<name>-auth`, identify `t_<name>-identify`, registration `t_<name>-reg` |
-| Process `<code>` | endpoint/aor `p_<code>`, identify `p_<code>-identify`, auth `p_<code>-auth`, context `proc-<code>` |
+| Process `<code>` | endpoint/aor `p_<code>`, identify `p_<code>-identify`, auth `p_<code>-auth`, context `proc-<code>`, monitor-only endpoint/aor `p_<code>-mon` (IP auth, OPTIONS ping) |
 | Channel names | `PJSIP/p_<code>-xxxxxxxx`, `PJSIP/t_<name>-xxxxxxxx` (tracker counts by this pattern) |
 | Groups | `<code>@sdproc` (process limit), `<name>@sdtrunk` (trunk limit) — `asterisk -rx "group show channels"` |
 

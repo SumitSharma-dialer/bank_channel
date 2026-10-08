@@ -117,15 +117,29 @@ async function collect(traceLog) {
   return { at: now, rows };
 }
 
-// cheap per-process view for the Processes page: code -> live (not expired) registered contacts
-async function registered() {
-  const now = Date.now(), out = {};
-  for (const [code, list] of Object.entries(parseRegistrar(await cli('database show registrar')))) {
-    const live = list.map(({ ip, port, userAgent, expiresAt }) => ({ ip, port, userAgent, expiresIn: expiresAt ? Math.round((expiresAt - now) / 1000) : null }))
-      .filter((c) => c.expiresIn == null || c.expiresIn > 0);
-    if (live.length) out[code] = live;
+// `pjsip show contacts` lines of the monitor-only AORs of IP processes (render.js [p_<code>-mon]):
+// "  Contact:  p_acme-mon/sip:1.2.3.4:5060   ef5ebf5494 Avail   12.345"  -> { acme: [{ ip, status: 'Avail', rtt: 12.3 }] }
+function parseMonContacts(out) {
+  const r = {};
+  for (const line of String(out || '').split('\n')) {
+    const m = /^\s*Contact:\s+p_([a-z0-9_]+)-mon\/sips?:(?:[^@\s]*@)?([0-9.]+)(?::\d+)?\S*\s+\S+\s+(\w+)\s+(\S+)/.exec(line);
+    if (m) (r[m[1]] = r[m[1]] || []).push({ ip: m[2], status: m[3], rtt: Number.isFinite(+m[4]) ? Math.round(+m[4] * 10) / 10 : null });
   }
-  return out;
+  return r;
 }
 
-module.exports = { collect, registered, parseRegistrations, parseRegistrar, lastLogLine, lastPacket };
+// cheap per-process view for the Processes page:
+// registered: code -> live (not expired) contacts the customer registered from (password auth)
+// reachable:  code -> OPTIONS ping result per fixed customer IP (IP auth)
+async function status() {
+  const [dbOut, contactsOut] = await Promise.all([cli('database show registrar'), cli('pjsip show contacts')]);
+  const now = Date.now(), registered = {};
+  for (const [code, list] of Object.entries(parseRegistrar(dbOut))) {
+    const live = list.map(({ ip, port, userAgent, expiresAt }) => ({ ip, port, userAgent, expiresIn: expiresAt ? Math.round((expiresAt - now) / 1000) : null }))
+      .filter((c) => c.expiresIn == null || c.expiresIn > 0);
+    if (live.length) registered[code] = live;
+  }
+  return { registered, reachable: parseMonContacts(contactsOut) };
+}
+
+module.exports = { collect, status, parseMonContacts, parseRegistrations, parseRegistrar, lastLogLine, lastPacket };
