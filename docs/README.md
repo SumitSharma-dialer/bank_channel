@@ -13,6 +13,7 @@ host `172.20.10.201` (public `182.95.69.226` via NAT), app in `/opt/sipdist`, As
 | [processes.md](processes.md) | Processes page: IP vs username + password authentication, every form field (IPs, SIP port, IP lock), the list columns, Connection online / offline and how it is checked, Peer config |
 | [diagnostics.md](diagnostics.md) | Diagnostics page (issue tracker, SIP trace, RTP, tcpdump, log search) and custom dispositions (LIMIT_REACH, SIP_DOWN, SIP response per reject) |
 | [known-issues.md](known-issues.md) | Problems found while writing these docs (config mismatches, dead code, schema drift) |
+| [client/SIPDist-New-Features-Oct-2026.pdf](client/SIPDist-New-Features-Oct-2026.pdf) | Client handout: trunk CPS limit, resource history graphs, live Asterisk log in Diagnostics, log retention (October 2026) |
 
 ## One-paragraph summary
 
