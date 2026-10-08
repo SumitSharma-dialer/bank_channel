@@ -97,6 +97,9 @@ Generated context `[proc-<code>]` (see `renderDialplan` / `headerCheck` / `dialT
 6. Channel limits with Asterisk groups: `GROUP(sdproc)=<code>` then `GROUP_COUNT > channel_limit` → `CHANNEL_LIMIT`;
    `GROUP(sdtrunk)=<trunk>` then `> max_channels` → `TRUNK_LIMIT` (both cause 34 → 503). Join-then-count means two
    simultaneous calls can never overshoot the limit.
+   Then the trunk CPS limit (`trunks.cps`, 0 = off): `GROUP(sdcps)=<trunk>_<EPOCH>` then `GROUP_COUNT > cps` → the
+   call waits 100 ms and retries (next second = new group), up to 30 times (3 s), then `TRUNK_LIMIT`. Calls are
+   paced, not dropped, during short bursts.
 7. Number sent = `trunks.prefix` + `X-Number` with `strip_digits` removed; caller ID = the DID.
    `Dial(PJSIP/<number>@t_<trunk>, dial_timeout)`.
 8. At hangup, handler `[sd-hangup]` sends `UserEvent(SIPDIST_END, ...)`. Node (`tracker.saveCall`) receives it over ARI

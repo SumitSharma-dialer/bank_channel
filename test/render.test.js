@@ -73,6 +73,16 @@ test('unlimited trunk skips trunk group', () => {
   assert.ok(!renderDialplan([proc], [{ ...trunk, max_channels: 0 }]).includes('sdtrunk'));
 });
 
+test('trunk cps paces outbound calls, 0 = no cps gate', () => {
+  assert.ok(!renderDialplan([proc], [trunk]).includes('sdcps'));
+  const d = renderDialplan([proc], [{ ...trunk, cps: 5 }]);
+  assert.ok(d.includes('Set(SD_CPSG=airtel1_${EPOCH})'));
+  assert.ok(d.includes('GROUP_COUNT(${SD_CPSG}@sdcps)} <= 5]?cpsok'));
+  assert.ok(d.includes('GotoIf($[${SD_CPSW} > 30]?tcps)') && d.includes('n(tcps),Set(SD_DISP=TRUNK_LIMIT)'));
+  assert.ok(d.indexOf('Set(GROUP(sdcps)') < d.indexOf('GROUP_COUNT(${SD_CPSG}'), 'join before count');
+  assert.ok(d.indexOf('?tlimit') < d.indexOf('n(cps)') && d.indexOf('n(cpsok)') < d.indexOf('Dial('), 'after channel limits, before Dial');
+});
+
 test('config injection is stripped', () => {
   const out = renderTrunks([{ ...trunk, password: 'x\n[evil]\ntype=endpoint' }]);
   assert.ok(!out.includes('[evil]'));

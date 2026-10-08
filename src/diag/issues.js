@@ -70,7 +70,7 @@ async function checks() {
     if (d.SIP_DOWN) add(`sipdown_calls:${name}`, 'critical', `SIP_DOWN calls on trunk ${name}`,
       `${d.SIP_DOWN} call(s) in the last ${WINDOW_MIN} min could not reach the trunk.`, 'See the trunk state and a SIP trace on the carrier IP.');
     if (d.TRUNK_LIMIT) add(`tlimit:${name}`, 'warning', `Trunk ${name} limit reached`,
-      `${d.TRUNK_LIMIT} call(s) rejected in the last ${WINDOW_MIN} min (TRUNK_LIMIT).`, 'Raise max channels on the trunk.');
+      `${d.TRUNK_LIMIT} call(s) rejected in the last ${WINDOW_MIN} min (TRUNK_LIMIT).`, 'Raise max channels (or CPS) on the trunk.');
     const reached = sum(d, ['ANSWERED', 'BUSY', 'NO_ANSWER', 'CANCEL', 'CONGESTION', 'FAILED', 'SIP_DOWN']);
     const failed = sum(d, ['CONGESTION', 'FAILED', 'SIP_DOWN']);
     if (reached >= 10 && failed / reached >= 0.5) add(`failrate:${name}`, 'critical', `High failure rate on trunk ${name}`,

@@ -309,7 +309,7 @@ function drawTrunks() {
           <button class="btn sm danger" data-del="${t.id}">Delete</button></div>
       </header>
       <div class="tc-facts">
-        <div><span>Host</span><b class="mono">${esc(t.host)}:${t.port}</b><small>${t.transport.toUpperCase()}${t.register ? ' · registers' : ''}</small></div>
+        <div><span>Host</span><b class="mono">${esc(t.host)}:${t.port}</b><small>${t.transport.toUpperCase()}${t.register ? ' · registers' : ''}${t.cps ? ` · max ${t.cps} CPS` : ''}</small></div>
         <div><span>Live channels</span>${usage(L.live, t.max_channels)}</div>
         <div><span>Sold to processes</span><b class="num">${fmtInt(t.assigned_channels)} ch</b><small>${t.process_count} process${t.process_count === 1 ? '' : 'es'}${over ? ' · <span class="chip warn">oversubscribed</span>' : ''}</small></div>
         <div><span>Inbound calls</span>${t.allow_inbound === false ? '<b><span class="chip bad">blocked</span></b><small>all carrier calls rejected</small>'
@@ -350,7 +350,7 @@ function drawTrunks() {
 }
 async function trunkForm(t, opt = {}) {
   const procs = await api('GET', '/api/processes');
-  const v = t || { allow_inbound: true, port: 5060, transport: 'udp', register: true, max_channels: 30, strip_digits: 0, prefix: '', codecs: 'ulaw,alaw', dial_timeout: 60, active: true };
+  const v = t || { allow_inbound: true, port: 5060, transport: 'udp', register: true, max_channels: 30, cps: 0, strip_digits: 0, prefix: '', codecs: 'ulaw,alaw', dial_timeout: 60, active: true };
   openModal(t ? `Edit trunk ${t.name}` : 'Add SIP trunk', `<form id="tf"><div class="fgrid">
     <label>Trunk name <small>a-z 0-9 _ (used in Asterisk as t_name)</small><input name="name" value="${esc(v.name || '')}" required pattern="[a-z0-9_]{2,32}" ${t ? '' : 'autofocus'}></label>
     <label>Description<input name="description" value="${esc(v.description || '')}" placeholder="Carrier / circle"></label>
@@ -364,7 +364,9 @@ async function trunkForm(t, opt = {}) {
     <div class="row"><label>From user <small>optional</small><input name="from_user" value="${esc(v.from_user || '')}"></label>
       <label>From domain <small>optional</small><input name="from_domain" value="${esc(v.from_domain || '')}"></label></div>
     <div class="fsec">Capacity</div>
-    <label>Total channels <small>hard limit on this trunk, 0 = unlimited</small><input name="max_channels" type="number" min="0" value="${v.max_channels}" required></label>
+    <div class="row"><label>Total channels <small>hard limit on this trunk, 0 = unlimited</small><input name="max_channels" type="number" min="0" value="${v.max_channels}" required></label>
+      <label>CPS <small>new calls per second, 0 = unlimited</small><input name="cps" type="number" min="0" max="1000" value="${v.cps || 0}" required></label></div>
+    <p class="hint full">Calls over the CPS limit wait (up to 3 s) for a free slot, then are rejected as TRUNK_LIMIT.</p>
     <div class="fsec">DID numbers on this trunk</div>
     <p class="hint full">Ranges of numbers the carrier gave you. <b>Caller ID</b> = processes in “random DID from trunk” mode send one of these numbers.
       <b>Inbound to</b> = calls from the carrier to these numbers are sent to that process. A single DID: leave “last” blank.</p>
@@ -827,7 +829,7 @@ const DISP_HELP = {
   FAILED: 'Other failure. Look at the hangup cause and a SIP trace.',
   SIP_DOWN: 'The trunk (or, inbound, the customer server) could not be reached: qualify failed or no reply. Check IP/port, firewall and the trunk state.',
   CHANNEL_LIMIT: 'The process already had its channel limit of calls up. Raise the limit or lower customer concurrency.',
-  TRUNK_LIMIT: 'The trunk max channels was full.',
+  TRUNK_LIMIT: 'The trunk max channels was full, or the trunk CPS limit stayed full for 3 s.',
   BLOCKED: 'Process inactive, or this call direction is switched off for it.',
   NO_ROUTE: 'No active trunk for the process / no process for the inbound DID.',
   INVALID: 'Dialed number is not the process dummy number (outbound) or DID not on the trunk (inbound).',

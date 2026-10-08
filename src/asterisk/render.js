@@ -74,7 +74,7 @@ function renderTrunks(trunks) {
     const transport = tp(t.transport === 'tcp' ? 'tcp' : 'udp');
     const hasAuth = !!(t.username && t.password);
 
-    out += `;; ---- trunk ${t.name}${t.description ? ' — ' + clean(t.description) : ''} (max ${t.max_channels || 'unlimited'} ch)\n`;
+    out += `;; ---- trunk ${t.name}${t.description ? ' — ' + clean(t.description) : ''} (max ${t.max_channels || 'unlimited'} ch, ${+t.cps || 'unlimited'} cps)\n`;
     out += `[${id}]\ntype=aor\ncontact=sip:${host}:${port}\nqualify_frequency=60\nqualify_timeout=3\n\n`;
     if (hasAuth) {
       out += `[${id}-auth]\ntype=auth\nauth_type=userpass\nusername=${clean(t.username)}\npassword=${clean(t.password)}\n\n`;
@@ -194,13 +194,34 @@ function dialTail(p, t, num, cliLines) {
       ? ` same => n,Set(GROUP(sdtrunk)=${t.name})\n` +
         ` same => n,GotoIf($[\${GROUP_COUNT(${t.name}@sdtrunk)} > ${tmax}]?tlimit)\n`
       : '') +
+    cpsGate(t) +
     ` same => n,Set(SD_OUT=${prefix}\${${num}:${strip}})\n` +
     cliLines +
     ` same => n,Set(SD_CLIOUT=\${CALLERID(num)})\n` +
     ` same => n,Dial(PJSIP/\${SD_OUT}@t_${t.name},${timeout})\n` +
     ` same => n,Hangup()\n` +
     hangup('CHANNEL_LIMIT', 'plimit') +
-    (tmax > 0 ? hangup('TRUNK_LIMIT', 'tlimit') : '');
+    (tmax > 0 ? hangup('TRUNK_LIMIT', 'tlimit') : '') +
+    (+t.cps > 0 ? hangup('TRUNK_LIMIT', 'tcps') : '');
+}
+
+// Trunk calls-per-second limit (trunks.cps, 0 = off). Each call joins GROUP(sdcps)=<trunk>_<epoch second>, then
+// counts that group: join-then-count like the channel limits, so a second never gets more than cps calls. Over the
+// limit the call is paced, not dropped: wait 100 ms and retry (in the next second it joins the new group), up to
+// CPS_WAIT_STEPS times, then TRUNK_LIMIT. Groups go away with the channels, so no global state is left behind.
+const CPS_WAIT_STEPS = 30;   // 30 × 0.1 s = 3 s
+function cpsGate(t) {
+  const cps = Math.max(0, Math.min(1000, +t.cps || 0));
+  if (!cps) return '';
+  return ` same => n,Set(SD_CPSW=0)\n` +
+    ` same => n(cps),Set(SD_CPSG=${t.name}_\${EPOCH})\n` +
+    ` same => n,Set(GROUP(sdcps)=\${SD_CPSG})\n` +
+    ` same => n,GotoIf($[\${GROUP_COUNT(\${SD_CPSG}@sdcps)} <= ${cps}]?cpsok)\n` +
+    ` same => n,Set(SD_CPSW=$[\${SD_CPSW} + 1])\n` +
+    ` same => n,GotoIf($[\${SD_CPSW} > ${CPS_WAIT_STEPS}]?tcps)\n` +
+    ` same => n,Wait(0.1)\n` +
+    ` same => n,Goto(cps)\n` +
+    ` same => n(cpsok),NoOp(cps ${cps} on ${t.name}, waited \${SD_CPSW} x 100 ms)\n`;
 }
 
 // Outbound = header dialing only: the client (identified by IP) dials the process's dummy number and sends

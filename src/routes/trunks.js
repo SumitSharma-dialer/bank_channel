@@ -7,7 +7,7 @@ const { Bad, wrap, str, int, bool, name, HOST_RE, codecs, safeText } = require('
 
 const PUBLIC_COLS = `t.id,t.name,t.description,t.host,t.port,t.transport,t.username,
   (t.password IS NOT NULL AND t.password<>'') AS has_password,t.register,t.from_user,t.from_domain,
-  t.max_channels,t.prefix,t.strip_digits,t.codecs,t.dial_timeout,t.allow_inbound,t.active,t.created_at,t.updated_at`;
+  t.max_channels,t.cps,t.prefix,t.strip_digits,t.codecs,t.dial_timeout,t.allow_inbound,t.active,t.created_at,t.updated_at`;
 
 function parse(b, existing) {
   // dialing fields are no longer in the form: not sent = keep current value (new trunk = default)
@@ -29,6 +29,7 @@ function parse(b, existing) {
     from_user: safeText(b.from_user, 128) || null,
     from_domain: safeText(b.from_domain, 255) || null,
     max_channels: int(b.max_channels, { min: 0, max: 100000, def: 30 }),
+    cps: int(b.cps, { min: 0, max: 1000, def: existing ? existing.cps : 0 }),
     prefix,
     strip_digits: int(b.strip_digits, { min: 0, max: 10, def: 0 }),
     codecs: codecs(b.codecs),

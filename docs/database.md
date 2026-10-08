@@ -43,6 +43,7 @@ daily_stats (day, scope, ref)     ref = process code | trunk name | DID
 | register | bool | true | outbound registration (only if username+password) |
 | from_user, from_domain | varchar | | optional From header overrides |
 | max_channels | int | 30 | trunk limit, 0 = unlimited |
+| cps | int | 0 | max new outbound calls per second, 0 = unlimited. Extra calls wait up to 3 s, then `TRUNK_LIMIT` |
 | prefix | varchar(32) | '' | prepended to the number sent |
 | strip_digits | int | 0 | digits removed from the front (0–10) |
 | codecs | varchar(128) | ulaw,alaw | |
