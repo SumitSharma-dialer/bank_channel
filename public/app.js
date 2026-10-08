@@ -826,7 +826,7 @@ PAGES.dispositions = async (main) => {
 
 // =================================================================== DIAGNOSTICS
 const Diag = { tab: 'issues', timer: null, names: {} };
-const DIAG_TABS = [['issues', 'Issues'], ['sip', 'SIP trace'], ['rtp', 'RTP / audio'], ['pcap', 'Packet capture'], ['log', 'Asterisk log'], ['lookup', 'Call lookup']];
+const DIAG_TABS = [['issues', 'Issues'], ['reg', 'Registrations'], ['sip', 'SIP trace'], ['rtp', 'RTP / audio'], ['pcap', 'Packet capture'], ['log', 'Asterisk log'], ['lookup', 'Call lookup']];
 const ago = (ms) => fmtDur(Math.max(0, Math.round((Date.now() - ms) / 1000)));
 const durBetween = (a, b) => fmtDur(Math.max(0, Math.round((new Date(b) - new Date(a)) / 1000)));
 // ip[:port] -> "trunk x" / "proc y" / "SIPDist"
@@ -900,6 +900,46 @@ DiagTab.issues = async (el) => {
   const load = async () => draw(await api('GET', '/api/diag/issues'));
   $('#iRun').onclick = async () => { $('#iRun').disabled = true; try { draw(await api('POST', '/api/diag/issues/run')); toast('Checks done'); } finally { $('#iRun').disabled = false; } };
   await load(); diagPoll(load, 15000);
+};
+
+// ---------------------------------------------------------------- registrations
+const REG_CLS = { REGISTERED: 'ok', 'NOT USED': '', 'NOT REGISTERED': 'bad', 'NOT LOADED': 'bad', REJECTED: 'bad', UNREGISTERED: 'warn' };
+const fmtLeft = (s) => (s == null || !isFinite(s) ? '—' : s <= 0 ? 'expired' : fmtDur(s));
+DiagTab.reg = async (el) => {
+  el.innerHTML = `<div class="panel"><h2>SIP registrations <span><button class="btn sm" id="rgRef">Refresh</button></span></h2>
+    <div class="summary" id="rgSum"></div>
+    <div class="tw"><table><thead><tr><th>Trunk / process</th><th>Account</th><th>State</th><th class="r">Expires in</th><th>Registered from</th><th>Last log line</th><th>Last packet (trace)</th><th></th></tr></thead><tbody id="rgBody"><tr><td colspan="8" class="empty">Loading…</td></tr></tbody></table></div>
+    <div class="body"><p class="hint"><b>Outgoing</b> = this server registers to the carrier: needs "Register" on <i>and</i> a username/password on the trunk.
+      <b>Incoming</b> = the customer registers to this server: only processes with password authentication. Click <b>Trace REGISTER</b> to watch the REGISTER / 401 / 200 packets live.</p></div></div>`;
+  const load = async () => {
+    const r = await api('GET', '/api/diag/registrations');
+    const n = (f) => r.rows.filter(f).length;
+    $('#rgSum').innerHTML = `<span class="chip ok">${n((x) => x.state === 'REGISTERED')} registered</span>` +
+      `<span class="chip ${n((x) => x.expected && x.state !== 'REGISTERED') ? 'bad' : ''}">${n((x) => x.expected && x.state !== 'REGISTERED')} failing</span>` +
+      `<span class="chip">${n((x) => !x.expected)} not using registration</span><span class="chip">updated ${clock(r.at)}</span>`;
+    $('#rgBody').innerHTML = r.rows.length ? r.rows.map((x, i) => `<tr>
+      <td style="white-space:nowrap"><b>${esc(x.kind)} ${esc(x.name)}</b>${x.label ? ` <small style="color:var(--ink-3)">${esc(x.label)}</small>` : ''}<br>
+        <span class="chip ${x.direction === 'out' ? 'info' : ''}" style="margin-top:4px" title="${x.direction === 'out' ? 'this server registers to the carrier' : 'customer registers to this server'}">${x.direction === 'out' ? 'outgoing ↗' : 'incoming ↙'}</span></td>
+      <td class="mono" style="font-size:12.5px">${esc(x.who)}${x.serverUri ? `<br><small>${esc(x.serverUri)}</small>` : ''}</td>
+      <td style="min-width:220px"><span class="chip ${x.state in REG_CLS ? REG_CLS[x.state] : 'bad'}">${esc(x.state)}</span>${x.why ? `<div class="hint" style="margin-top:4px">${esc(x.why)}</div>` : ''}</td>
+      <td class="r num">${x.state === 'REGISTERED' ? fmtLeft(x.expiresIn) : '—'}</td>
+      <td class="mono" style="font-size:12px">${x.contacts.length ? x.contacts.map((c) => `${esc(c.ip)}${c.port ? ':' + c.port : ''}${c.userAgent ? `<br><small>${esc(c.userAgent)}</small>` : ''}`).join('<br>') : '—'}</td>
+      <td style="max-width:260px">${x.lastLog ? `<div class="mono logline ${LOG_CLS[x.lastLog.level] || ''}" title="${esc(x.lastLog.line)}">${esc(x.lastLog.line)}</div>` : '<span class="hint">—</span>'}</td>
+      <td class="mono" style="font-size:12px">${x.lastPacket ? `<span class="chip ${/^2/.test(x.lastPacket.label) ? 'ok' : /^[3-6]/.test(x.lastPacket.label) ? 'bad' : ''}">${esc(x.lastPacket.label)}</span><br><small>${esc(clock(x.lastPacket.ts))} ${esc(x.lastPacket.src)} → ${esc(x.lastPacket.dst)}</small>` : '<span class="hint">no trace data</span>'}</td>
+      <td class="r" style="white-space:nowrap"><button class="btn sm" data-trace="${i}">Trace REGISTER</button></td></tr>`).join('')
+      : '<tr><td colspan="8" class="empty">No trunks or processes.</td></tr>';
+    $$('[data-trace]').forEach((b) => (b.onclick = async () => {
+      const x = r.rows[+b.dataset.trace];
+      try {
+        await api('POST', '/api/diag/sip/start', { target: x.target, minutes: 10 });
+        Diag.sipPreset = { types: ['register'] };
+        toast(`Tracing ${x.kind} ${x.name} — showing REGISTER packets`);
+        $('#dTabs [data-t=sip]').click();
+      } catch (er) { toast(er.message, true); }
+    }));
+  };
+  $('#rgRef').onclick = () => load().catch((e) => toast(e.message, true));
+  await load(); diagPoll(load, 5000);
 };
 
 // ---------------------------------------------------------------- SIP trace (sngrep-like)
@@ -1007,6 +1047,10 @@ DiagTab.sip = async (el) => {
     $('#vLive').classList.toggle('hidden', v !== 'live'); $('#vCalls').classList.toggle('hidden', v !== 'calls');
   };
   $$('#stView button').forEach((b) => (b.onclick = () => view(b.dataset.v)));
+  if (Diag.sipPreset) {   // opened from Registrations: only REGISTER, live view
+    $$('.lt', el).forEach((c) => (c.checked = Diag.sipPreset.types.includes(c.value)));
+    Diag.sipView = 'live'; Diag.sipPreset = null;
+  }
   view(Diag.sipView || 'live');
   await Promise.all([load(), live()]);
   diagPoll(() => (Diag.sipView === 'calls' ? load() : live()), 1000);

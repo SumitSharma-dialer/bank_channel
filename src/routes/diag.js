@@ -61,6 +61,9 @@ router.get('/status', wrap(async (req, res) => {
 router.get('/issues', wrap(async (req, res) => res.json(await issues.list(int(req.query.limit, { min: 10, max: 1000, def: 200 })))));
 router.post('/issues/run', wrap(async (req, res) => { await issues.run(); res.json(await issues.list()); }));
 
+// ------------------------------------------------------------------ registrations
+router.get('/registrations', wrap(async (req, res) => res.json(await require('../diag/reg').collect(cap.trace.log))));
+
 // ------------------------------------------------------------------ SIP trace
 router.post('/sip/start', wrap(async (req, res) => {
   const tg = await target(req.body);
