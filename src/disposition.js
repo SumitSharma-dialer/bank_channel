@@ -40,4 +40,4 @@ function disposition(raw, cause) {
   return DIAL_MAP[d] || 'FAILED';
 }
 
-module.exports = { disposition, OWN };
+module.exports = { disposition, OWN, CAUSE_MAP, BY_CAUSE };

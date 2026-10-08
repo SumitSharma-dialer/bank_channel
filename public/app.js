@@ -754,7 +754,7 @@ PAGES.cdr = async (main) => {
         <td class="mono">${c.direction === 'in' ? '<span class="chip info" title="inbound call to a DID">in</span> ' : ''}${esc(c.dialed || '')}</td><td class="mono" style="color:var(--ink-2)">${esc(c.sent_number || '')}</td>
         <td class="mono" style="font-size:12.5px">${esc(c.cli_out || c.cli_in || '')}</td>
         <td class="mono" style="font-size:12.5px">${esc(c.did || '')}${c.hdr_status && c.hdr_status !== 'none' ? ` <span class="chip ${c.hdr_status === 'ok' ? 'ok' : 'bad'}" title="header dialing call">hdr ${esc(HDR_TXT[c.hdr_status] || c.hdr_status)}</span>` : ''}</td><td>${dispChip(c.disposition)}</td>
-        <td class="r num">${c.ring_sec}s</td><td class="r num">${fmtDur(c.bill_sec)}</td><td class="r num" title="Q.850 hangup cause">${c.hangup_cause || ''}</td></tr>`).join('')
+        <td class="r num">${c.ring_sec}s</td><td class="r num">${fmtDur(c.bill_sec)}</td><td class="r" style="font-size:12.5px;white-space:nowrap" title="Q.850 hangup cause">${c.hangup_cause ? `<span class="num">${c.hangup_cause}</span> <span style="color:var(--ink-3)">${esc(Q850[c.hangup_cause] || '')}</span>` : ''}</td></tr>`).join('')
         : `<tr><td colspan="11" class="empty">No calls for this filter.</td></tr>`;
       const pages = Math.max(1, Math.ceil(r.total / r.size));
       $('#cPager').innerHTML = `Page ${page} of ${pages} <button class="btn sm" id="pv" ${page <= 1 ? 'disabled' : ''}>‹ Prev</button><button class="btn sm" id="nx" ${page >= pages ? 'disabled' : ''}>Next ›</button>`;
@@ -906,14 +906,30 @@ const DISP_HELP = {
   NO_HEADER: 'X-DID / X-Number header missing or not digits. Fix the customer dialplan.',
   INVALID_DID: 'X-DID is not a caller-ID DID of the trunk.',
 };
-const Q850 = { 1: 'unallocated number', 3: 'no route to destination', 16: 'normal clearing', 17: 'user busy', 18: 'no user responding',
-  19: 'no answer', 20: 'subscriber absent', 21: 'call rejected', 27: 'destination out of order', 28: 'invalid number format',
-  31: 'normal, unspecified', 34: 'no circuit available', 38: 'network out of order', 41: 'temporary failure', 42: 'switching equipment congestion',
-  44: 'requested channel not available', 58: 'bearer capability not available', 102: 'timer expired', 127: 'interworking' };
+// ITU-T Q.850 / ISDN hangup causes (HANGUPCAUSE) with plain-English meaning
+const Q850 = { 1: 'unallocated (unassigned) number', 2: 'no route to specified transit network', 3: 'no route to destination',
+  6: 'channel unacceptable', 7: 'call awarded, delivered in established channel', 16: 'normal clearing', 17: 'user busy',
+  18: 'no user responding', 19: 'no answer from user (user alerted)', 20: 'subscriber absent (switched off / out of coverage)',
+  21: 'call rejected', 22: 'number changed', 23: 'redirected to new destination', 25: 'exchange routing error',
+  26: 'non-selected user clearing', 27: 'destination out of order', 28: 'invalid number format (incomplete number)',
+  29: 'facility rejected', 30: 'response to STATUS ENQUIRY', 31: 'normal, unspecified', 34: 'no circuit/channel available',
+  38: 'network out of order', 41: 'temporary failure', 42: 'switching equipment congestion', 43: 'access information discarded',
+  44: 'requested channel not available', 47: 'resource unavailable, unspecified', 49: 'quality of service not available',
+  50: 'requested facility not subscribed', 52: 'outgoing calls barred', 54: 'incoming calls barred',
+  57: 'bearer capability not authorized', 58: 'bearer capability not presently available', 63: 'service or option not available',
+  65: 'bearer capability not implemented', 66: 'channel type not implemented', 69: 'requested facility not implemented',
+  79: 'service or option not implemented', 81: 'invalid call reference value', 82: 'identified channel does not exist',
+  88: 'incompatible destination', 95: 'invalid message, unspecified', 96: 'mandatory information element missing',
+  97: 'message type non-existent', 98: 'message not compatible with call state', 99: 'information element non-existent',
+  100: 'invalid information element contents', 101: 'message not compatible with call state', 102: 'recovery on timer expiry',
+  103: 'parameter non-existent, passed on', 111: 'protocol error, unspecified', 127: 'interworking, unspecified' };
 
 PAGES.dispositions = async (main) => {
   main.innerHTML = `<div class="head"><div><h1>Dispositions</h1><p>Give any disposition your own code (shown in CDR, CSV, stats and the live feed) and choose the SIP response the customer gets when the distributor rejects a call.</p></div></div>
-    <div class="panel"><div class="tw"><table><thead><tr><th>Internal code</th><th>Shown as</th><th>Label</th><th>Set by</th><th>SIP response</th><th>Meaning</th><th></th></tr></thead><tbody id="dBody"></tbody></table></div></div>`;
+    <div class="panel"><div class="tw"><table><thead><tr><th>Internal code</th><th>Shown as</th><th>Label</th><th>Set by</th><th>SIP response</th><th>Meaning</th><th></th></tr></thead><tbody id="dBody"></tbody></table></div></div>
+    <div class="panel"><h2>ISDN / Q.850 hangup causes</h2>
+      <p class="hint" id="qHint"></p>
+      <div class="tw"><table><thead><tr><th class="r">Cause</th><th>Meaning</th><th>Disposition</th></tr></thead><tbody id="qBody"></tbody></table></div></div>`;
   const load = async () => {
     const r = await api('GET', '/api/dispositions');
     S.dispositions = r.rows;
@@ -924,6 +940,13 @@ PAGES.dispositions = async (main) => {
       <td style="font-size:12.5px;color:var(--ink-2);max-width:380px">${esc(DISP_HELP[d.code] || '')}</td>
       <td class="r"><button class="btn sm" data-edit="${esc(d.code)}">Edit</button></td></tr>`).join('');
     $$('[data-edit]').forEach((b) => (b.onclick = () => edit(r.rows.find((x) => x.code === b.dataset.edit), r.sipCodes)));
+
+    // cause -> disposition comes from the server (src/disposition.js), so this table always matches what is saved
+    const cm = r.causeMap || {};
+    $('#qHint').innerHTML = `For calls that are not answered and end as ${(r.causeFor || []).map((x) => `<span class="mono">${esc(x)}</span>`).join(' / ')}, the hangup cause decides the disposition. Other causes keep what Asterisk reports. Answered calls, SIP_DOWN and the distributor's own rejects are never changed.`;
+    $('#qBody').innerHTML = Object.keys(Q850).map(Number).sort((x, y) => x - y).map((k) => `<tr>
+      <td class="r num">${k}</td><td>${esc(Q850[k])}</td>
+      <td>${cm[k] ? dispChip(cm[k]) : '<span style="color:var(--ink-3);font-size:12.5px">as reported</span>'}</td></tr>`).join('');
   };
   const edit = (d, sipCodes) => openModal(`Disposition ${d.code}`, `<form class="mbody" id="df">
       <label>Shown as <small>custom code, A-Z 0-9 _ (empty = ${esc(d.code)})</small><input name="custom_code" class="mono" maxlength="16" value="${esc(d.custom_code || '')}" placeholder="${esc(d.code)}" style="text-transform:uppercase"></label>
