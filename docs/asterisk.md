@@ -30,8 +30,13 @@ Preview without writing: UI → System → config preview, or `npm run render`.
 | `/etc/asterisk/ari.conf` (line ~76) | user `[sipdist]`, `type=user`, `read_only=no`, `password_format=plain`, `password=…` | Node backend ARI login — must match `ARI_USER`/`ARI_PASS` in `.env` |
 | `/etc/asterisk/http.conf` | `enabled=yes`, `bindaddr=127.0.0.1`, `bindport=8088` | ARI on loopback only |
 
-Not configured live: `cdr_pgsql.conf` (stock file; `cdr_pgsql.so` not running). `rtp.conf` is the stock file:
-RTP ports **10000–20000** (the full-mode template would use 10000–30000).
+| `/etc/asterisk/asterisk.conf` `[options]` | `maxfiles = 1048576` (by hand, 2026-10-08) | open file handles for many concurrent calls — see [operations.md § Capacity](operations.md#capacity-and-tuning) |
+| `/etc/asterisk/rtp.conf` | `rtpend=30000` (by hand, 2026-10-08; was the stock 20000) | RTP ports **10000–30000** = 10,000 media streams ≈ 5,000 calls |
+| `/etc/systemd/system/asterisk.service.d/sipdist-limits.conf` | `LimitNOFILE=1048576`, `LimitNPROC=infinity`, `TasksMax=infinity` (from `deploy/asterisk-limits.conf`, installed by setup.sh) | the systemd default soft limit of 1024 files capped Asterisk at ~200 calls |
+
+Backup of the files before the 2026-10-08 change: `/etc/asterisk/backup-limits-20261008-091031/`.
+
+Not configured live: `cdr_pgsql.conf` (stock file; `cdr_pgsql.so` not running).
 
 ### Templates in the repo (`deploy/asterisk/`, full mode only)
 

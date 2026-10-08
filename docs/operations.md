@@ -16,6 +16,51 @@ Unit `/etc/systemd/system/sipdist.service`: user/group `asterisk`, `WorkingDirec
 Startup order in `src/server.js`: create first admin if none → start ARI tracker → apply config to Asterisk → listen
 on port 3000.
 
+## Capacity and tuning
+
+How many calls at the same time this server can carry (one call = customer leg + carrier leg, both through Asterisk
+because `direct_media=no`; G.711 `ulaw`/`alaw` passthrough, no transcoding). The lowest line is the real limit:
+
+| Limit | Ceiling | Why |
+|---|---|---|
+| Open files (Asterisk) | ~170,000 calls | `LimitNOFILE` / `maxfiles` = 1,048,576; ~6 per call (RTP + RTCP per leg, SIP) |
+| RTP ports | **5,000 calls** | `rtp.conf` 10000–30000 = 10,000 RTP ports (RTCP uses the odd one) ÷ 2 legs |
+| Network (1 Gbit/s `en01`) | **~4,500 calls** | G.711 at 20 ms = 50 packets/s, ~95 kbit/s per direction on the wire; each call sends 2 and receives 2 streams = ~190 kbit/s each way. 1 Gbit/s × ~85 % usable |
+| Asterisk / CPU (48 × Xeon E5-2651 v2 @ 1.8 GHz) | **~2,000–3,000 calls (estimate, not load-tested)** | Asterisk relays every RTP packet in user space: 3,000 calls = 600,000 packets/s through one Asterisk process. Older 1.8 GHz cores; per-call channel threads and locks, not total cores, set the limit |
+
+**Plan for ~2,000 concurrent calls; up to ~3,000 after a load test.** Above that: a second server, or a 10 Gbit/s link plus
+a media relay (rtpengine) so Asterisk does not handle RTP itself. Call setup rate (calls per second) also matters
+for dialers: load-test it too.
+
+Load test before selling more channels (sum of all process channel limits ≤ the tested number): run SIPp with RTP
+(`sipp -sf uac_pcap.xml …`) from another machine against a test process and trunk, raise the call count step by step,
+and watch `top -H -p $(pidof asterisk)`, `asterisk -rx 'core show channels count'`, and Diagnostics → RTP / audio for
+packet loss and jitter. Stop at the first step with loss > 1 % or a core of Asterisk at 100 %.
+
+Tuning in place (2026-10-08, files in `deploy/`, installed by `setup.sh`):
+
+| Setting | Value | File |
+|---|---|---|
+| Asterisk open files | `LimitNOFILE=1048576` (was soft 1024 ≈ 200 calls) | `/etc/systemd/system/asterisk.service.d/sipdist-limits.conf` ← `deploy/asterisk-limits.conf` |
+| Asterisk threads / processes | `LimitNPROC=infinity`, `TasksMax=infinity` | same |
+| Asterisk `maxfiles` | 1048576 | `/etc/asterisk/asterisk.conf` `[options]` |
+| RTP ports | 10000–30000 (was 10000–20000) | `/etc/asterisk/rtp.conf`; app setting `RTP_START`/`RTP_END` (default 10000/30000) must match |
+| UDP buffers | `rmem_max`/`wmem_max` 16 MB, `rmem_default`/`wmem_default` 1 MB | `/etc/sysctl.d/90-sipdist.conf` ← `deploy/sysctl-sipdist.conf` |
+| Kernel backlog | `netdev_max_backlog=10000` | same |
+| Ephemeral ports | 32768–60999 (kept above the RTP range) | same |
+
+Firewall: UDP **10000–30000** (RTP) and UDP/TCP 5060 (SIP) must be open from carriers and customers. `ufw` is off
+on this server; check any firewall in front of it. Check the limits Asterisk really runs with:
+
+```bash
+grep 'open files' /proc/$(pidof asterisk)/limits
+asterisk -rx 'core show settings' | grep 'open file'
+asterisk -rx 'rtp show settings' | grep Port
+```
+
+Changing the systemd limits or `maxfiles` needs `systemctl daemon-reload && systemctl restart asterisk`, which drops live
+calls. Do it when `asterisk -rx 'core show channels count'` shows 0. `rtp.conf` changes: `asterisk -rx 'module reload res_rtp_asterisk.so'`.
+
 ## npm scripts (run from `/opt/sipdist`, as `asterisk`)
 
 | Command | What it does |
@@ -96,7 +141,7 @@ Every create/update/delete writes `audit_log` and triggers an Asterisk apply; th
 | Customer call not identified (401/no endpoint) | source IP not in `allowed_ips`; `asterisk -rx 'pjsip show identifies'` |
 | Live counters look wrong | they self-heal every 10 s from ARI; Redis can be flushed safely (`sd:*` keys) |
 | Trunk "Unavailable" / `SIP_DOWN` calls | qualify OPTIONS to the carrier fail; Diagnostics → SIP trace with "include OPTIONS" ticked, filtered on the carrier IP |
-| No audio / one-way audio | Diagnostics → RTP / audio: "no RTP received" on a channel, or a one-way stream in the capture; check NAT / `rtp_symmetric` / firewall on UDP 10000-20000 |
+| No audio / one-way audio | Diagnostics → RTP / audio: "no RTP received" on a channel, or a one-way stream in the capture; check NAT / `rtp_symmetric` / firewall on UDP 10000-30000 |
 | SIP trace says "Operation not permitted" | the unit is missing `AmbientCapabilities=CAP_NET_RAW` — see [diagnostics.md](diagnostics.md#permissions-tcpdump-needs-cap_net_raw) |
 | Deleting a trunk gives a server error | live FK is `ON DELETE RESTRICT` — move/delete its processes first |
 

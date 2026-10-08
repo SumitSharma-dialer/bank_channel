@@ -58,7 +58,7 @@ sngrep runs headless (`sngrep -N -q -F -d any -O <tmpfile> <match> <bpf>`; `-r` 
 `/tmp` that is removed after the download.
 
 Settings (`.env`, optional): `SNGREP_BIN`, `ASTERISK_LOG` (default `/var/log/asterisk/messages.log`), `RTP_START` / `RTP_END`
-(default 10000 / 20000, must match `rtp.conf`), `TCPDUMP_BIN`.
+(default 10000 / 30000, must match `rtp.conf`), `TCPDUMP_BIN`.
 
 ## Dispositions page (custom dispositions)
 
