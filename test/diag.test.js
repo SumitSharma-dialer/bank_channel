@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { PcapReader, toPcap } = require('../src/diag/pcap');
-const { parse, splitStream, DialogStore } = require('../src/diag/sip');
+const { parse, splitStream, DialogStore, MessageLog } = require('../src/diag/sip');
 const { RtpAnalyzer } = require('../src/diag/rtp');
 
 // ---- build a pcap (Linux cooked v2, like `tcpdump -i any`)
@@ -140,4 +140,18 @@ test('RTP analyzer: loss, sequence errors, one-way detection, DTMF ignored', () 
   assert.strictEqual(s.expected, 100); assert.strictEqual(s.lost, 2); assert.strictEqual(s.lossPct, 2);   // across the 16-bit wrap
   assert.strictEqual(s.seqErrors, 1); assert.strictEqual(s.maxDeltaMs, 60); assert.strictEqual(s.jitterMs < 5, true);
   assert.ok(s.oneWay); assert.ok(s.problems.some((p) => /one-way/.test(p))); assert.ok(s.problems.some((p) => /2% loss/.test(p)));
+});
+
+test('message log keeps every SIP message in order, filters by type and text, polls with after', () => {
+  const log = new MessageLog(5);
+  const pkt = (ts) => ({ ts, src: '10.0.0.5', sport: 5060, dst: '172.20.10.201', dport: 5060, proto: 'udp' });
+  const reg = `REGISTER sip:172.20.10.201 SIP/2.0\r\nFrom: <sip:acme@x>;tag=1\r\nTo: <sip:acme@x>\r\nCall-ID: r1\r\nCSeq: 1 REGISTER\r\n\r\n`;
+  [req('INVITE', 1), resp(100, 'Trying', 1, 'INVITE'), resp(180, 'Ringing', 1, 'INVITE'), reg,
+    resp(401, 'Unauthorized', 1, 'REGISTER').replace(CID, 'r1'), resp(200, 'OK', 1, 'INVITE')].forEach((t, i) => log.add(pkt(i), parse(t)));
+  assert.strictEqual(log.list.length, 5);   // ring buffer
+  assert.deepStrictEqual(log.since(0).map((e) => e.label), ['100 Trying', '180 Ringing', 'REGISTER', '401 Unauthorized', '200 OK']);
+  assert.deepStrictEqual(log.since(0, { types: new Set(['register']) }).map((e) => e.label), ['REGISTER', '401 Unauthorized']);
+  assert.deepStrictEqual(log.since(0, { types: new Set(['call']) }).map((e) => e.code), [100, 180, 200]);
+  assert.deepStrictEqual(log.since(4).map((e) => e.id), [5, 6]);
+  assert.deepStrictEqual(log.since(0, { q: 'r1' }).map((e) => e.label), ['REGISTER', '401 Unauthorized']);   // by Call-ID
 });

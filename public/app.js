@@ -908,19 +908,33 @@ DiagTab.sip = async (el) => {
   el.innerHTML = `<div class="panel" style="margin-bottom:14px"><form class="filters" id="stf">
       ${targetField()}
       <label>Run for<select name="minutes"><option value="5">5 min</option><option value="10" selected>10 min</option><option value="30">30 min</option><option value="60">60 min</option></select></label>
-      <label class="check" style="max-width:none"><input type="checkbox" name="keepNoise"> include OPTIONS / REGISTER</label>
+      <label class="check" style="max-width:none" title="Live messages always show REGISTER / OPTIONS; this adds them to the Calls list too"><input type="checkbox" name="keepNoise"> REGISTER/OPTIONS in Calls</label>
       <div class="actions"><button class="btn primary" id="stGo">Start trace</button><button type="button" class="btn" id="stStop">Stop</button><button type="button" class="btn" id="stClr">Clear</button></div>
     </form><div class="summary" id="stSum"></div>
+    <div class="tabs sub" id="stView"><button data-v="live">Live messages <small>INVITE · 100 · 180 · 200 · BYE · REGISTER…</small></button><button data-v="calls">Calls <small>one row per call, like sngrep</small></button></div>
+    <div id="vLive">
+      <div class="filters live-f">
+        <span class="seg">${[['call', 'Calls (INVITE/ACK/BYE/CANCEL)', 1], ['register', 'REGISTER', 1], ['options', 'OPTIONS', 0], ['other', 'Other', 1]]
+          .map(([v, l, on]) => `<label class="check"><input type="checkbox" class="lt" value="${v}" ${on ? 'checked' : ''}> ${l}</label>`).join('')}</span>
+        <label style="max-width:260px">Search<input id="lmQ" class="mono" placeholder="number, Call-ID, IP, any text"></label>
+        <span class="seg"><label class="check"><input type="checkbox" id="lmFull"> full text <small>like tcpdump -A</small></label>
+          <label class="check"><input type="checkbox" id="lmScroll" checked> auto-scroll</label></span>
+        <div class="actions"><button type="button" class="btn sm" id="lmPause">Pause</button><button type="button" class="btn sm" id="lmEmpty">Clear view</button></div>
+      </div>
+      <div class="lmhead"><span>Time</span><span>From → To</span><span>Message</span><span>CSeq</span><span>From user → To user</span><span>Call-ID</span></div>
+      <div class="lmlist" id="lmList"><div class="empty">Start a trace: every SIP request and response shows up here as it happens.</div></div>
+    </div>
+    <div id="vCalls" class="hidden">
     <div class="filters" style="border-bottom:1px solid var(--line)"><label style="max-width:320px">Search <input id="stQ" class="mono" placeholder="number, DID, Call-ID, IP"></label>
       <label style="max-width:160px">Method<select id="stM"><option value="">All</option><option>INVITE</option><option>REGISTER</option><option>OPTIONS</option></select></label></div>
-    <div class="tw" style="max-height:420px;overflow:auto"><table><thead><tr><th>Start</th><th>Method</th><th>From</th><th>To</th><th>Source</th><th>Destination</th><th class="r">Msgs</th><th>State</th><th>Codecs</th></tr></thead><tbody id="stBody"></tbody></table></div></div>
+    <div class="tw" style="max-height:420px;overflow:auto"><table><thead><tr><th>Start</th><th>Method</th><th>From</th><th>To</th><th>Source</th><th>Destination</th><th class="r">Msgs</th><th>State</th><th>Codecs</th></tr></thead><tbody id="stBody"></tbody></table></div></div></div>
     <div id="stFlow"></div>`;
   const f = $('#stf'); targetWire(f);
   const status = (st) => {
     const err = st.error ? `<span class="chip bad" style="white-space:normal">${esc(st.error)}</span>` : '';
     $('#stSum').innerHTML = (st.running ? `<span class="chip ok">● capturing</span><span class="chip">until ${clock(st.until)}</span>` : `<span class="chip">stopped</span>`) +
       (st.label ? `<span class="chip info">${esc(st.label)}</span>` : '') +
-      `<span class="chip mono">${esc(st.filter || 'no trace yet')}</span><span class="chip">${fmtInt(st.packets)} packets</span><span class="chip">${fmtInt(st.dialogs)} dialogs</span>${err}`;
+      `<span class="chip mono">${esc(st.filter || 'no trace yet')}</span><span class="chip">${fmtInt(st.packets)} packets</span><span class="chip">${fmtInt(st.messages || 0)} messages</span><span class="chip">${fmtInt(st.dialogs)} calls</span>${err}`;
     $('#stGo').textContent = st.running ? 'Restart trace' : 'Start trace';
   };
   let sel = null;
@@ -942,9 +956,60 @@ DiagTab.sip = async (el) => {
     catch (er) { toast(er.message, true); }
   });
   $('#stStop').onclick = async () => { status(await api('POST', '/api/diag/sip/stop')); };
-  $('#stClr').onclick = async () => { status(await api('POST', '/api/diag/sip/clear')); sel = null; $('#stFlow').innerHTML = ''; load(); };
+  $('#stClr').onclick = async () => { status(await api('POST', '/api/diag/sip/clear')); sel = null; $('#stFlow').innerHTML = ''; lmReset(); load(); };
   $('#stQ').oninput = () => load().catch(() => {}); $('#stM').onchange = () => load().catch(() => {});
-  await load(); diagPoll(load, 2000);
+
+  // ---- live messages: poll new messages every second and append (like sngrep raw / tcpdump -A)
+  let after = 0, paused = false, rows = 0;
+  const list = $('#lmList');
+  const types = () => $$('.lt', el).filter((c) => c.checked).map((c) => c.value).join(',');
+  const cls = (m) => (m.request ? 'req' : m.code < 200 ? 'prov' : m.code < 300 ? 'ok' : 'bad');
+  const row = (m) => {
+    const d = document.createElement('div');
+    d.className = `lm ${cls(m)}${$('#lmFull').checked ? ' open' : ''}`;
+    d.innerHTML = `<div class="lmrow"><span class="t">${esc(clock(m.ts))}.${String(Math.floor(m.ts % 1000)).padStart(3, '0')}</span>
+      <span class="ep">${esc(m.src)}<small> ${esc(epName(m.src))}</small> → ${esc(m.dst)}<small> ${esc(epName(m.dst))}</small></span>
+      <span class="lab">${esc(m.label)}${m.sdp ? ' <small>SDP ' + esc(m.sdp) + '</small>' : ''}</span><span class="cs">${esc(m.cseq)}</span>
+      <span class="ft">${esc(m.from)} → ${esc(m.to)}${m.xnum ? ' <small>X-Number ' + esc(m.xnum) + '</small>' : ''}</span><span class="cid" title="show this call's flow">${esc(m.callId)}</span></div>
+      <pre class="raw">${esc(m.raw)}</pre>`;
+    $('.lmrow', d).onclick = () => d.classList.toggle('open');
+    $('.cid', d).onclick = (e) => { e.stopPropagation(); flow(m.callId); };
+    return d;
+  };
+  const lmReset = () => { after = 0; rows = 0; list.innerHTML = '<div class="empty">Waiting for SIP messages…</div>'; };
+  const live = async () => {
+    if (paused) return;
+    if (!types()) { rows = 0; list.innerHTML = '<div class="empty">Tick at least one message type.</div>'; return; }
+    const r = await api('GET', '/api/diag/sip/messages?' + new URLSearchParams({ after, types: types(), q: $('#lmQ').value.trim() }));
+    status(r.status);
+    if (!r.messages.length) {
+      if (!rows) list.innerHTML = `<div class="empty">${r.status.running ? 'Waiting for SIP messages…' : 'Start a trace: every SIP request and response shows up here as it happens.'}</div>`;
+      after = Math.max(after, r.status.lastId || 0);
+      return;
+    }
+    if (!rows) list.innerHTML = '';
+    const frag = document.createDocumentFragment();
+    for (const m of r.messages) frag.append(row(m));
+    list.append(frag); rows += r.messages.length;
+    while (rows > 1500) { list.firstElementChild.remove(); rows--; }   // keep the page light
+    after = Math.max(r.messages[r.messages.length - 1].id, r.status.lastId || 0);
+    if ($('#lmScroll').checked) list.scrollTop = list.scrollHeight;
+  };
+  $$('.lt', el).forEach((c) => (c.onchange = () => { lmReset(); live().catch(() => {}); }));
+  let qt; $('#lmQ').oninput = () => { clearTimeout(qt); qt = setTimeout(() => { lmReset(); live().catch(() => {}); }, 300); };
+  $('#lmFull').onchange = () => $$('.lm', list).forEach((x) => x.classList.toggle('open', $('#lmFull').checked));
+  $('#lmPause').onclick = () => { paused = !paused; $('#lmPause').textContent = paused ? 'Resume' : 'Pause'; $('#lmPause').classList.toggle('primary', paused); };
+  $('#lmEmpty').onclick = () => { rows = 0; list.innerHTML = '<div class="empty">Cleared — new messages appear here.</div>'; };
+
+  const view = (v) => {
+    Diag.sipView = v;
+    $$('#stView button').forEach((b) => b.classList.toggle('on', b.dataset.v === v));
+    $('#vLive').classList.toggle('hidden', v !== 'live'); $('#vCalls').classList.toggle('hidden', v !== 'calls');
+  };
+  $$('#stView button').forEach((b) => (b.onclick = () => view(b.dataset.v)));
+  view(Diag.sipView || 'live');
+  await Promise.all([load(), live()]);
+  diagPoll(() => (Diag.sipView === 'calls' ? load() : live()), 1000);
 };
 
 // call flow ladder for one dialog

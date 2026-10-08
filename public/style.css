@@ -293,3 +293,30 @@ td small, .mono small { color: var(--ink-3); font-family: var(--sans); }
 .seg { display: flex; gap: 18px; flex-wrap: wrap; }
 .seg small { color: var(--ink-3); font-weight: 400; }
 .filters .tgt { max-width: 340px; flex: 2 1 240px; }
+/* live SIP messages */
+.tabs.sub { padding: 12px 16px 0; margin: 0; border-bottom: 1px solid var(--line); }
+.tabs.sub button { border-bottom-left-radius: 0; border-bottom-right-radius: 0; margin-bottom: -1px; }
+.tabs.sub small { opacity: .7; font-size: 11px; margin-left: 4px; }
+.live-f { border-bottom: 1px solid var(--line); }
+.live-f label.check { min-width: 0; max-width: none; flex: none; }
+.lmhead, .lmrow { display: grid; grid-template-columns: 96px minmax(230px, 1.6fr) minmax(150px, 1fr) 110px minmax(150px, 1fr) minmax(120px, 1fr); gap: 10px; align-items: baseline; }
+.lmhead { padding: 8px 16px; font: 600 11px var(--sans); text-transform: uppercase; letter-spacing: .7px; color: var(--ink-3); background: var(--panel-2); border-bottom: 1px solid var(--line); }
+.lmlist { max-height: 560px; overflow: auto; font: 12.5px var(--mono); }
+.lm { border-bottom: 1px solid var(--line); }
+.lmrow { padding: 6px 16px; cursor: pointer; }
+.lmrow:hover { background: var(--panel-2); }
+.lmrow > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lmrow .t { color: var(--ink-3); }
+.lmrow .lab { font-weight: 600; }
+.lm.req .lab { color: var(--ink); } .lm.prov .lab { color: var(--info); } .lm.ok .lab { color: var(--accent); } .lm.bad .lab { color: var(--bad); }
+.lmrow small { color: var(--ink-3); font-weight: 400; }
+.lmrow .cid { color: var(--ink-3); text-decoration: underline dotted; }
+.lm .raw { display: none; margin: 0 16px 8px 122px; padding: 8px 10px; background: var(--panel-2); border: 1px solid var(--line); border-left: 3px solid var(--line-2); border-radius: 6px; white-space: pre-wrap; word-break: break-all; font-size: 12px; }
+.lm.open .raw { display: block; }
+.lm.ok.open .raw { border-left-color: var(--accent); } .lm.bad.open .raw { border-left-color: var(--bad); } .lm.prov.open .raw { border-left-color: var(--info); }
+@media (max-width: 820px) {
+  .lmhead { display: none; }
+  .lmrow { grid-template-columns: 80px 1fr; }
+  .lmrow .cs, .lmrow .cid { display: none; }
+  .lm .raw { margin-left: 16px; }
+}

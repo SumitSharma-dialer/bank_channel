@@ -75,6 +75,12 @@ router.get('/sip/dialogs', (req, res) => {
   const method = /^[A-Z]{3,10}$/.test(req.query.method || '') ? req.query.method : '';
   res.json({ status: cap.trace.status(), dialogs: cap.trace.store.list({ q: str(req.query.q, 64), method, limit: 500 }) });
 });
+// live message stream: poll with ?after=<last id>; types=call,register,options,other
+router.get('/sip/messages', (req, res) => {
+  const types = new Set(String(req.query.types || '').split(',').filter((t) => ['call', 'register', 'options', 'other'].includes(t)));
+  const after = Math.max(0, parseInt(req.query.after, 10) || 0);
+  res.json({ status: cap.trace.status(), messages: cap.trace.log.since(after, { types, q: str(req.query.q, 64), limit: after ? 500 : 300 }) });
+});
 router.get('/sip/dialog', (req, res) => {
   const g = cap.trace.store.get(String(req.query.id || ''));
   if (!g) return res.status(404).json({ error: 'dialog not in the trace buffer' });
