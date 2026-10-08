@@ -162,7 +162,7 @@ cp "$SRC/deploy/sysctl-sipdist.conf" /etc/sysctl.d/90-sipdist.conf
 sysctl -q -p /etc/sysctl.d/90-sipdist.conf || true
 systemctl daemon-reload
 
-say "Asterisk CLI log (full) and 5-day log retention"
+say "Asterisk CLI log (full) and log retention (full / messages.log 3 days)"
 grep -q '^full =>' "$AST/logger.conf" || sed -i 's|^messages.log => .*|&\nfull => notice,warning,error,verbose(3),dtmf|' "$AST/logger.conf"
 cp "$SRC/deploy/logrotate-asterisk" /etc/logrotate.d/asterisk
 mkdir -p /etc/systemd/journald.conf.d

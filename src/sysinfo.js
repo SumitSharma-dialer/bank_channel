@@ -52,6 +52,18 @@ const pidof = (name) => new Promise((resolve) => {
   execFile('pidof', ['-s', name], { timeout: 2000 }, (err, out) => resolve(err ? null : +String(out).trim() || null));
 });
 
+async function disks() {
+  const out = [];
+  for (const m of parseMounts(await read('/proc/mounts'))) {
+    try {
+      const s = await fs.statfs(m.mount);
+      const total = s.blocks * s.bsize, free = s.bavail * s.bsize;   // bavail = what non-root can still write
+      out.push({ ...m, total, used: total - s.bfree * s.bsize, available: free });
+    } catch { /* unreadable mount: skip */ }
+  }
+  return out;
+}
+
 async function collect() {
   const pid = await pidof('asterisk');
   const sample = async () => ({ cpu: parseCpuLine(await read('/proc/stat')), ast: pid ? parsePidJiffies(await read(`/proc/${pid}/stat`)) : 0 });
@@ -62,23 +74,64 @@ async function collect() {
   // Asterisk share of the whole box (all cores = 100 %), same scale as the CPU total
   const astPct = pid && b.cpu.total > a.cpu.total ? Math.round(((b.ast - a.ast) / (b.cpu.total - a.cpu.total)) * 1000) / 10 : null;
 
-  const disks = [];
-  for (const m of parseMounts(await read('/proc/mounts'))) {
-    try {
-      const s = await fs.statfs(m.mount);
-      const total = s.blocks * s.bsize, free = s.bavail * s.bsize;   // bavail = what non-root can still write
-      disks.push({ ...m, total, used: total - s.bfree * s.bsize, available: free });
-    } catch { /* unreadable mount: skip */ }
-  }
-
   return {
     at: Date.now(),
     cpu: { percent: cpuPct(a.cpu, b.cpu), cores, model: (os.cpus()[0] || {}).model || '', load: os.loadavg().map((x) => Math.round(x * 100) / 100), asterisk: astPct },
     memory: parseMeminfo(await read('/proc/meminfo')),
-    disks,
+    disks: await disks(),
     uptime: Math.round(os.uptime()),
     hostname: os.hostname(),
   };
 }
 
-module.exports = { collect, parseCpuLine, cpuPct, parseMeminfo, parseMounts, parsePidJiffies };
+// ---------------------------------------------------------------- history (System page graphs)
+// One row in sys_metrics per minute: CPU % averaged over that minute, RAM used, storage used per disk.
+// Kept HISTORY_DAYS (5) — pruned here every hour, independent of RETENTION_DAYS.
+const HISTORY_DAYS = 5;
+const EVERY_MS = 60 * 1000;
+let last = null, lastPrune = 0;
+
+async function sample(q) {
+  const cpu = parseCpuLine(await read('/proc/stat'));
+  const prev = last;
+  last = cpu;
+  if (!prev) return;   // first tick only sets the baseline: CPU % needs two readings
+  const m = parseMeminfo(await read('/proc/meminfo'));
+  const d = (await disks()).map((x) => ({ mount: x.mount, used: x.used, total: x.total }));
+  await q('INSERT INTO sys_metrics(cpu, mem_used, mem_total, disks) VALUES($1,$2,$3,$4)', [cpuPct(prev, cpu), m.used, m.total, JSON.stringify(d)]);
+  if (Date.now() - lastPrune > 3600 * 1000) {
+    lastPrune = Date.now();
+    await q(`DELETE FROM sys_metrics WHERE at < now() - interval '${HISTORY_DAYS} days'`);
+  }
+}
+
+function startHistory() {
+  const { q } = require('./db');
+  const go = () => sample(q).catch((e) => console.error('[sysinfo]', e.message));
+  go();
+  setInterval(go, EVERY_MS);
+}
+
+// rows from the last `hours`, averaged into at most `points` buckets: { at, cpu, mem, disks: { mount: pct } } (percent)
+async function history(q, hours, points = 600) {
+  const { rows } = await q(`SELECT extract(epoch FROM at)*1000 AS at, cpu, mem_used, mem_total, disks FROM sys_metrics
+    WHERE at >= now() - make_interval(hours => $1) ORDER BY at`, [hours]);
+  const size = Math.max(60000, Math.ceil((hours * 3600000) / points / 60000) * 60000);
+  const buckets = new Map();
+  for (const r of rows) {
+    const k = Math.floor(r.at / size) * size;
+    let b = buckets.get(k);
+    if (!b) buckets.set(k, (b = { at: k, n: 0, cpu: 0, mem: 0, disks: {}, dn: {} }));
+    b.n++; b.cpu += r.cpu; b.mem += r.mem_total ? (100 * r.mem_used) / r.mem_total : 0;
+    for (const x of r.disks || []) {
+      if (!x.total) continue;
+      b.disks[x.mount] = (b.disks[x.mount] || 0) + (100 * x.used) / x.total;
+      b.dn[x.mount] = (b.dn[x.mount] || 0) + 1;
+    }
+  }
+  const r1 = (v) => Math.round(v * 10) / 10;
+  return [...buckets.values()].map((b) => ({ at: b.at, cpu: r1(b.cpu / b.n), mem: r1(b.mem / b.n),
+    disks: Object.fromEntries(Object.entries(b.disks).map(([k, v]) => [k, r1(v / b.dn[k])])) }));
+}
+
+module.exports = { collect, startHistory, history, HISTORY_DAYS, parseCpuLine, cpuPct, parseMeminfo, parseMounts, parsePidJiffies };

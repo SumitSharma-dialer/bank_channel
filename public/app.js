@@ -803,6 +803,42 @@ PAGES.stats = async (main) => {
   f.addEventListener('submit', (e) => { e.preventDefault(); load().catch((er) => toast(er.message, true)); });
   await fillRefs(); load().catch((er) => toast(er.message, true));
 };
+// % line over time (0–100, one axis), crosshair + tooltip on hover. get(point) -> value or undefined (gap).
+function lineChart(el, pts, get, spanMs) {
+  const W = 520, H = 150, L = 34, R = 8, T = 8, B = 20, end = Date.now(), start = end - spanMs;
+  const x = (t) => L + ((t - start) / spanMs) * (W - L - R), y = (v) => T + (1 - Math.min(100, Math.max(0, v)) / 100) * (H - T - B);
+  const step = Math.max(...pts.slice(1).map((p, i) => p.at - pts[i].at).sort((a, b) => a - b).slice(0, 1), 60000);
+  let d = '', prev = null;
+  for (const p of pts) {   // break the line where samples are missing (service down)
+    const v = get(p); if (v == null) { prev = null; continue; }
+    d += `${prev && p.at - prev.at <= step * 3 ? 'L' : 'M'}${x(p.at).toFixed(1)},${y(v).toFixed(1)}`; prev = p;
+  }
+  const fmtT = (t, long) => new Date(t).toLocaleString([], long ? { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }
+    : spanMs > 864e5 ? { month: 'short', day: 'numeric' } : { hour: '2-digit', minute: '2-digit' });
+  let s = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block" role="img">`;
+  for (const v of [0, 50, 100]) s += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/><text x="${L - 6}" y="${y(v) + 3.5}" text-anchor="end" font-size="10" fill="var(--ink-3)" font-family="var(--mono)">${v}%</text>`;
+  for (let i = 0; i <= 4; i++) { const t = start + (spanMs * i) / 4; s += `<text x="${x(t)}" y="${H - 5}" text-anchor="${i === 0 ? 'start' : i === 4 ? 'end' : 'middle'}" font-size="10" fill="var(--ink-3)" font-family="var(--mono)">${fmtT(t)}</text>`; }
+  s += `<path d="${d}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    <line class="rh-x" y1="${T}" y2="${H - B}" stroke="var(--ink-3)" stroke-dasharray="2 3" visibility="hidden"/>
+    <circle class="rh-dot" r="4" fill="var(--accent)" stroke="var(--panel)" stroke-width="2" visibility="hidden"/>
+    <rect x="${L}" y="0" width="${W - L - R}" height="${H}" fill="transparent"/></svg><div class="rh-tip hidden"></div>`;
+  el.innerHTML = s;
+  const live = [...pts].reverse().find((p) => get(p) != null);
+  const cur = el.parentElement.querySelector('[data-cur]'); if (cur && live) cur.textContent = `${get(live)}%`;
+  const svg = el.firstChild, line = svg.querySelector('.rh-x'), dot = svg.querySelector('.rh-dot'), tip = el.querySelector('.rh-tip');
+  svg.addEventListener('pointermove', (e) => {
+    const b = svg.getBoundingClientRect(), t = start + (((e.clientX - b.left) / b.width) * W - L) / (W - L - R) * spanMs;
+    let best = null; for (const p of pts) if (get(p) != null && (!best || Math.abs(p.at - t) < Math.abs(best.at - t))) best = p;
+    if (!best) return;
+    const px = x(best.at), py = y(get(best));
+    line.setAttribute('x1', px); line.setAttribute('x2', px); dot.setAttribute('cx', px); dot.setAttribute('cy', py);
+    line.setAttribute('visibility', 'visible'); dot.setAttribute('visibility', 'visible');
+    tip.innerHTML = `<b class="num">${get(best)}%</b> <span>${fmtT(best.at, true)}</span>`;
+    tip.classList.remove('hidden');
+    tip.style.left = `${Math.min(Math.max(0, (px / W) * b.width - tip.offsetWidth / 2), b.width - tip.offsetWidth)}px`;
+  });
+  svg.addEventListener('pointerleave', () => { line.setAttribute('visibility', 'hidden'); dot.setAttribute('visibility', 'hidden'); tip.classList.add('hidden'); });
+}
 function chart(el, data) {
   const W = 900, H = 200, pad = 28, top = Math.max(4, ...data.map((d) => d.total)), step = Math.ceil(top / 4), max = step * 4;
   const bw = (W - pad * 2) / data.length;
@@ -1353,7 +1389,10 @@ PAGES.system = async (main) => {
   main.innerHTML = `<div class="head"><div><h1>System</h1><p>Health, generated Asterisk config, live Asterisk views and audit log.</p></div>
     <div class="actions"><button class="btn" id="reapply">Re-apply config to Asterisk</button></div></div>
     <div class="panel" style="margin-bottom:14px"><h2>Server resources <small id="resInfo" style="font-weight:400;color:var(--ink-3);font-size:12.5px"></small></h2><div class="body"><div class="grid kpis" id="res" style="margin-bottom:0">Loading…</div></div></div>
-    <div class="panel" style="margin-bottom:14px"><h2>Asterisk CLI log <small style="font-weight:400;color:var(--ink-3);font-size:12.5px">— what <span class="mono">asterisk -rvvv</span> shows · kept 5 days · search older lines in <a href="#/diag?tab=log">Diagnostics → Asterisk log</a></small></h2>
+    <div class="panel" style="margin-bottom:14px"><h2>Resource history <small style="font-weight:400;color:var(--ink-3);font-size:12.5px">— one sample per minute · kept 5 days</small></h2>
+      <div class="body"><div class="tabs" id="rhTabs">${[[6, '6 h'], [24, '24 h'], [72, '3 days'], [120, '5 days']].map(([h, l]) => `<button data-h="${h}" class="${h === 24 ? 'on' : ''}">${l}</button>`).join('')}</div>
+        <div class="rh-grid" id="rh">Loading…</div></div></div>
+    <div class="panel" style="margin-bottom:14px"><h2>Asterisk CLI log <small style="font-weight:400;color:var(--ink-3);font-size:12.5px">— what <span class="mono">asterisk -rvvv</span> shows · kept 3 days · search older lines in <a href="#/diag?tab=log">Diagnostics → Asterisk log</a></small></h2>
       <form class="filters" id="clf" style="border-bottom:0"><label style="max-width:300px">Contains<input name="q" class="mono" placeholder="number, IP, C-0000001a, p_code…"></label>
         <label style="max-width:120px">Lines<select name="lines"><option>100</option><option selected>300</option><option>1000</option></select></label>
         <label class="check" style="max-width:none"><input type="checkbox" name="follow" checked> Follow (every 3 s)</label></form>
@@ -1400,6 +1439,25 @@ PAGES.system = async (main) => {
       r.disks.map((x) => tile(`Storage <span class="mono" style="text-transform:none;letter-spacing:0">${esc(x.mount)}</span>`, pct(x.used, x.total),
         `${gb(x.used)} used of ${gb(x.total)} · ${gb(x.available)} free <span class="mono" style="color:var(--ink-3)" title="${esc(x.device)}">${esc(x.fstype)}</span>`)).join('');
   };
+  // CPU / RAM / storage history (sys_metrics), small multiples on one 0–100 % scale; refreshed every minute
+  let rhHours = 24;
+  const history = async () => {
+    const r = await api('GET', `/api/system/resources/history?hours=${rhHours}`);
+    const mounts = [...new Set(r.points.flatMap((p) => Object.keys(p.disks)))];
+    const series = [['CPU', (p) => p.cpu], ['RAM', (p) => p.mem], ...mounts.map((m) => [`Storage <span class="mono">${esc(m)}</span>`, (p) => p.disks[m]])];
+    $('#rh').innerHTML = r.points.length < 2 ? '<p class="hint">Collecting — the first points appear after a couple of minutes.</p>'
+      : series.map(([lab], i) => `<div class="rh-cell"><div class="rh-lab">${lab} <b class="num" data-cur></b></div><div class="rh-chart" data-i="${i}"></div></div>`).join('');
+    if (r.points.length < 2) return;
+    $('#rh').querySelectorAll('.rh-chart').forEach((el) => lineChart(el, r.points, series[+el.dataset.i][1], rhHours * 3600000));
+  };
+  $('#rhTabs').onclick = (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    $('#rhTabs').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+    rhHours = +b.dataset.h; history().catch((er) => toast(er.message, true));
+  };
+  history().catch((er) => { $('#rh').textContent = er.message; });
+  clearInterval(S.rhTimer);
+  S.rhTimer = setInterval(() => { if (S.page !== 'system') clearInterval(S.rhTimer); else if (!document.hidden) history().catch(() => {}); }, 60000);
   // live Asterisk CLI log (full log: NOTICE / WARNING / ERROR / VERBOSE / DTMF); stays put while you scroll up
   const clf = $('#clf'), logEl = $('#cliLog');
   const cliLog = async () => {

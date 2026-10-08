@@ -1,6 +1,20 @@
 # -> /etc/logrotate.d/asterisk (replaces the Debian package's weekly / 4 weeks)
-# Asterisk logs (full = what the CLI shows, messages.log, queue_log): one file per day, kept 5 days, gzip.
-/var/log/asterisk/*.log /var/log/asterisk/*_log /var/log/asterisk/full {
+# full (what the CLI shows) and messages.log: one file per day, kept 3 days, gzip.
+/var/log/asterisk/full /var/log/asterisk/messages.log {
+        daily
+        rotate 3
+        maxage 3
+        missingok
+        notifempty
+        compress
+        delaycompress
+        sharedscripts
+        postrotate
+                /usr/sbin/asterisk -rx 'logger reload' > /dev/null 2> /dev/null || true
+        endscript
+}
+# other Asterisk logs (queue_log, ...): kept 5 days
+/var/log/asterisk/*_log {
         daily
         rotate 5
         maxage 5

@@ -327,3 +327,13 @@ td small, .mono small { color: var(--ink-3); font-family: var(--sans); }
 h3.sub { font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: var(--ink-3); margin: 16px 0 8px; }
 details.setup summary { cursor: pointer; font-weight: 500; color: var(--ink-2); }
 details.setup pre { margin-top: 8px; white-space: pre-wrap; }
+
+/* ---------- resource history (System page) */
+.rh-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+.rh-lab { font: 500 12px var(--sans); color: var(--ink-2); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px; }
+.rh-lab .mono { text-transform: none; letter-spacing: 0; }
+.rh-lab b { color: var(--ink); margin-left: 6px; text-transform: none; }
+.rh-chart { position: relative; }
+.rh-tip { position: absolute; top: -6px; pointer-events: none; background: var(--panel); border: 1px solid var(--line-2); border-radius: 6px;
+  padding: 3px 8px; font-size: 12px; color: var(--ink-2); white-space: nowrap; box-shadow: 0 2px 8px rgba(0,0,0,.12); }
+.rh-tip b { color: var(--ink); }

@@ -85,14 +85,15 @@ tcpdump -ni en01 'host <customer ip>'                                           
 
 ## Logs and data retention
 
-Everything is kept **5 days** (set up 2026-10-08):
+Asterisk `full` and `messages.log` are kept **3 days**, everything else **5 days** (set up 2026-10-08):
 
 | What | Where | Kept | How |
 |---|---|---|---|
-| Asterisk CLI log (what `asterisk -rvvv` shows: NOTICE / WARNING / ERROR / VERBOSE 3 / DTMF) | `/var/log/asterisk/full` | 5 days | `logger.conf`: `full => notice,warning,error,verbose(3),dtmf`; `/etc/logrotate.d/asterisk` ← `deploy/logrotate-asterisk`: daily, `rotate 5`, `maxage 5`, gzip (`full.2.gz` …), then `asterisk -rx 'logger reload'` |
-| Asterisk warnings / errors | `/var/log/asterisk/messages.log` | 5 days | same logrotate rule |
+| Asterisk CLI log (what `asterisk -rvvv` shows: NOTICE / WARNING / ERROR / VERBOSE 3 / DTMF) | `/var/log/asterisk/full` | 3 days | `logger.conf`: `full => notice,warning,error,verbose(3),dtmf`; `/etc/logrotate.d/asterisk` ← `deploy/logrotate-asterisk`: daily, `rotate 3`, `maxage 3`, gzip (`full.2.gz` …), then `asterisk -rx 'logger reload'` |
+| Asterisk warnings / errors | `/var/log/asterisk/messages.log` | 3 days | same logrotate rule (`queue_log` and other `*_log`: 5 days) |
 | App log (`[http]`, `[ari]`, `[apply]`, `[retention]` …) and the rest of the system journal | journald (`journalctl -u sipdist`) | 5 days | `/etc/systemd/journald.conf.d/sipdist-retention.conf` ← `deploy/journald-retention.conf`: `MaxRetentionSec=5day` |
 | Call history | `calls`, `cdr` | 5 days | `src/retention.js`, 1 min after start then every 6 h, batches of 5000 rows; `RETENTION_DAYS` in `.env` changes it |
+| CPU / RAM / storage history (System → Resource history graphs) | `sys_metrics` | 5 days | `src/sysinfo.js`: one row per minute, rows older than 5 days deleted every hour (not `RETENTION_DAYS`) |
 | Audit log, Diagnostics issues (closed), alert log | `audit_log`, `diag_issues` (`closed_at`), `alert_log` | 5 days | same job; open issues are kept however old |
 | Reports | `daily_stats` | **kept** (not deleted) | one row per process / trunk / DID per day — Reports still show older days |
 

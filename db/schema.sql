@@ -461,6 +461,16 @@ CREATE TABLE IF NOT EXISTS diag_issues (
 CREATE INDEX IF NOT EXISTS diag_issues_opened_idx ON diag_issues(opened_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS diag_issues_open_uidx ON diag_issues(key) WHERE closed_at IS NULL;
 
+-- System page graphs: one sample per minute (src/sysinfo.js), pruned after 5 days
+CREATE TABLE IF NOT EXISTS sys_metrics (
+  at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  cpu        REAL NOT NULL,          -- % of all cores, averaged over the minute
+  mem_used   BIGINT NOT NULL,        -- bytes (total - MemAvailable)
+  mem_total  BIGINT NOT NULL,
+  disks      JSONB NOT NULL DEFAULT '[]'   -- [{ mount, used, total }] bytes
+);
+CREATE INDEX IF NOT EXISTS sys_metrics_at_idx ON sys_metrics(at);
+
 -- Slack / email alerts sent by src/diag/alerts.js (issue opened / resolved / reminder / test)
 CREATE TABLE IF NOT EXISTS alert_log (
   id       BIGSERIAL PRIMARY KEY,

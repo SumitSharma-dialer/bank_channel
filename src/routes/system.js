@@ -20,6 +20,12 @@ router.get('/health', wrap(async (req, res) => {
 
 // CPU / RAM / storage of this server (System page, refreshed every 5 s)
 router.get('/resources', wrap(async (req, res) => res.json(await require('../sysinfo').collect())));
+// last `hours` (max 5 days) of the per-minute samples, for the System page graphs
+router.get('/resources/history', wrap(async (req, res) => {
+  const sys = require('../sysinfo');
+  const hours = int(req.query.hours, { min: 1, max: sys.HISTORY_DAYS * 24, def: sys.HISTORY_DAYS * 24 });
+  res.json({ hours, points: await sys.history(q, hours) });
+}));
 
 router.post('/apply', wrap(async (req, res) => {
   await audit(req.user, 'apply', 'system', null, null);

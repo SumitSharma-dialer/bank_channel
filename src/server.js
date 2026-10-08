@@ -84,6 +84,7 @@ tracker.bus.on('call', (c) => broadcast('call', c));
   await auth.ensureAdmin();
   tracker.start();
   issues.start();
+  require('./sysinfo').startHistory();   // CPU / RAM / storage every minute, kept 5 days (System page graphs)
   require('./retention').start();   // delete DB history older than RETENTION_DAYS (5)
   apply('startup');   // make Asterisk config match the DB on every boot
   server.listen(cfg.http.port, cfg.http.host, () =>
