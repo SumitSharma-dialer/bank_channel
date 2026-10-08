@@ -161,6 +161,15 @@ cp "$SRC/deploy/asterisk-limits.conf" /etc/systemd/system/asterisk.service.d/sip
 cp "$SRC/deploy/sysctl-sipdist.conf" /etc/sysctl.d/90-sipdist.conf
 sysctl -q -p /etc/sysctl.d/90-sipdist.conf || true
 systemctl daemon-reload
+
+say "Asterisk CLI log (full) and 5-day log retention"
+grep -q '^full =>' "$AST/logger.conf" || sed -i 's|^messages.log => .*|&\nfull => notice,warning,error,verbose(3),dtmf|' "$AST/logger.conf"
+cp "$SRC/deploy/logrotate-asterisk" /etc/logrotate.d/asterisk
+mkdir -p /etc/systemd/journald.conf.d
+cp "$SRC/deploy/journald-retention.conf" /etc/systemd/journald.conf.d/sipdist-retention.conf
+systemctl restart systemd-journald || true
+asterisk -rx 'logger reload' >/dev/null 2>&1 || true
+
 if [[ ${ASTERISK_MODE:-integrate} != full ]]; then
   grep -q '^rtpend=30000' "$AST/rtp.conf" || echo "  NOTE: for >2500 calls set rtpstart=10000 rtpend=30000 in $AST/rtp.conf"
   echo "  NOTE: the new limits apply after 'systemctl restart asterisk' (drops live calls — do it when idle)"

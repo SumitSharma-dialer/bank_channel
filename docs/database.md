@@ -5,6 +5,9 @@
   and `setup.sh` default to `channel_bank`; the live install overrides it.
 - Schema source: `db/schema.sql` — idempotent, safe to re-run (`npm run db:init`). It creates missing tables/columns,
   relaxes leftover NOT NULL columns, and renames tables whose primary key is incompatible to `<name>_legacy_<timestamp>`.
+- **Retention: 5 days** (`RETENTION_DAYS`). `src/retention.js` deletes older rows of `calls`, `cdr`, `audit_log`,
+  `alert_log` and closed `diag_issues` every 6 h. `daily_stats` is kept (Reports). See
+  [operations.md § Logs and data retention](operations.md#logs-and-data-retention).
 
 ## Entity relations
 

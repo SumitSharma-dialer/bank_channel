@@ -12,7 +12,7 @@ Two UI pages for finding SIP and call problems: **Diagnostics** (`#/diag`) and *
 | **SIP trace → Calls** | Like `sngrep`: start a trace (1–60 min, optional IP filter), see every SIP dialog (INVITE, …) with its state (CALL SETUP / RINGING / IN CALL / COMPLETED / REJECTED / CANCELLED), click one for the ladder diagram and the full SIP messages, and download that call as `.pcap`. OPTIONS / REGISTER are included by default (untick to see only calls). | `tcpdump` → `src/diag/pcap.js` → `src/diag/sip.js` (in memory, last 2000 dialogs, 60 messages each) |
 | **RTP / audio** | (1) Asterisk's own RTP counters for every live channel (ARI `GET /channels/{id}/rtp_statistics`): packets, loss, jitter, RTT, with "no RTP received" (no / one-way audio) flags. (2) Capture RTP for 5–60 s and analyse each stream like `tshark -z rtp,streams`: codec, packets, lost, sequence errors, max gap, jitter, one-way detection. | `src/routes/diag.js`, `src/diag/rtp.js` |
 | **Packet capture** | Download a `.pcap` of SIP and/or RTP for 10–300 s. Tool: **tcpdump** (every packet, optional extra port) or **sngrep** (only SIP dialogs matching a number / DID / Call-ID). Open in Wireshark → Telephony → VoIP Calls. Also lists the CLI commands for `sngrep`, `tcpdump`, `tshark` over SSH, including one per trunk. | `src/diag/capture.js` |
-| **Asterisk log** | Search the end (last 8 MB) of `/var/log/asterisk/messages.log` by text and level. Click a `[C-xxxxxxxx]` call id to see every line of that call. | `GET /api/diag/log` |
+| **Asterisk log** | Search the end (last 32 MB) of `/var/log/asterisk/full` — the Asterisk CLI output (NOTICE / WARNING / ERROR / VERBOSE 3 / DTMF) — by text and level. Click a `[C-xxxxxxxx]` call id to see every line of that call. | `GET /api/diag/log` |
 | **Call lookup** | Enter a number / DID / Call-ID: CDR rows with what the disposition means and the Q.850 hangup cause, matching SIP dialogs from the trace buffer, and matching log lines. | combines the APIs above |
 
 ### Trunk / process filter
@@ -57,7 +57,7 @@ Captures only accept validated filters (IP / CIDR, port, SIP / RTP toggles), nev
 sngrep runs headless (`sngrep -N -q -F -d any -O <tmpfile> <match> <bpf>`; `-r` adds RTP) into a temp dir under
 `/tmp` that is removed after the download.
 
-Settings (`.env`, optional): `SNGREP_BIN`, `ASTERISK_LOG` (default `/var/log/asterisk/messages.log`), `RTP_START` / `RTP_END`
+Settings (`.env`, optional): `SNGREP_BIN`, `ASTERISK_LOG` (default `/var/log/asterisk/full`), `RTP_START` / `RTP_END`
 (default 10000 / 30000, must match `rtp.conf`), `TCPDUMP_BIN`.
 
 ## Dispositions page (custom dispositions)

@@ -83,6 +83,33 @@ tcpdump -ni en01 'udp dst port 5060 and not src net 172.20.10.192/27'          #
 tcpdump -ni en01 'host <customer ip>'                                           # a customer's REGISTER / INVITE
 ```
 
+## Logs and data retention
+
+Everything is kept **5 days** (set up 2026-10-08):
+
+| What | Where | Kept | How |
+|---|---|---|---|
+| Asterisk CLI log (what `asterisk -rvvv` shows: NOTICE / WARNING / ERROR / VERBOSE 3 / DTMF) | `/var/log/asterisk/full` | 5 days | `logger.conf`: `full => notice,warning,error,verbose(3),dtmf`; `/etc/logrotate.d/asterisk` ← `deploy/logrotate-asterisk`: daily, `rotate 5`, `maxage 5`, gzip (`full.2.gz` …), then `asterisk -rx 'logger reload'` |
+| Asterisk warnings / errors | `/var/log/asterisk/messages.log` | 5 days | same logrotate rule |
+| App log (`[http]`, `[ari]`, `[apply]`, `[retention]` …) and the rest of the system journal | journald (`journalctl -u sipdist`) | 5 days | `/etc/systemd/journald.conf.d/sipdist-retention.conf` ← `deploy/journald-retention.conf`: `MaxRetentionSec=5day` |
+| Call history | `calls`, `cdr` | 5 days | `src/retention.js`, 1 min after start then every 6 h, batches of 5000 rows; `RETENTION_DAYS` in `.env` changes it |
+| Audit log, Diagnostics issues (closed), alert log | `audit_log`, `diag_issues` (`closed_at`), `alert_log` | 5 days | same job; open issues are kept however old |
+| Reports | `daily_stats` | **kept** (not deleted) | one row per process / trunk / DID per day — Reports still show older days |
+
+Not changed: OS logs from rsyslog (`/var/log/syslog`, `auth.log` …) keep Ubuntu's weekly × 4.
+
+Effects of 5 days of `calls`:
+- Reports → call list / Call lookup only find the last 5 days (totals per day stay in `daily_stats`).
+- Inbound DID routing to "the process that last called this caller" only knows the last 5 days; older callbacks go to
+  the DID's assigned process.
+
+Where to read the CLI log: **System → Asterisk CLI log** (live, follows every 3 s, filter by text) and
+**Diagnostics → Asterisk log** (search the last 32 MB by text / level, click a `[C-xxxxxxxx]` call id for all its
+lines). Shell: `tail -f /var/log/asterisk/full`, older days `zgrep <text> /var/log/asterisk/full.*.gz`.
+
+Disk: verbose logging writes roughly 1–2 KB per call. At the planned ~2,000 concurrent calls of a dialer that is a
+few GB per day, so 5 days fits easily on `/` (78 GB free); watch **System → Server resources → Storage /**.
+
 ## npm scripts (run from `/opt/sipdist`, as `asterisk`)
 
 | Command | What it does |

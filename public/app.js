@@ -1292,13 +1292,14 @@ DiagTab.log = async (el, preset = '') => {
       <label class="check" style="max-width:none"><input type="checkbox" name="ERROR" checked> ERROR</label>
       <label class="check" style="max-width:none"><input type="checkbox" name="WARNING" checked> WARNING</label>
       <label class="check" style="max-width:none"><input type="checkbox" name="NOTICE" checked> NOTICE</label>
-      <label class="check" style="max-width:none"><input type="checkbox" name="VERBOSE"> VERBOSE</label>
+      <label class="check" style="max-width:none"><input type="checkbox" name="VERBOSE" checked> VERBOSE</label>
+      <label class="check" style="max-width:none"><input type="checkbox" name="DTMF"> DTMF</label>
       <label style="max-width:120px">Lines<select name="lines"><option>200</option><option selected>500</option><option>1000</option><option>2000</option></select></label>
       <div class="actions"><button class="btn primary">Search</button></div></form>
     <div class="summary" id="lSum"></div><div class="body" style="padding-top:0"><pre class="code logbox" id="lOut">Loading…</pre></div></div>`;
   const f = $('#lf');
   const load = async () => {
-    const levels = ['ERROR', 'WARNING', 'NOTICE', 'VERBOSE', 'DEBUG'].filter((l) => f[l] ? f[l].checked : false);
+    const levels = ['ERROR', 'WARNING', 'NOTICE', 'VERBOSE', 'DTMF', 'DEBUG'].filter((l) => f[l] ? f[l].checked : false);
     const r = await api('GET', '/api/diag/log?' + new URLSearchParams({ q: f.q.value.trim(), lines: f.lines.value, levels: levels.join(',') }));
     $('#lSum').innerHTML = `<span class="chip mono">${esc(r.file)}</span><span class="chip">${fmtInt(r.lines.length)} lines</span><span class="chip">searched last ${fmtInt(Math.round(r.scannedBytes / 1024))} KB</span>`;
     $('#lOut').innerHTML = r.lines.length ? r.lines.map((l) => {
@@ -1350,6 +1351,11 @@ PAGES.system = async (main) => {
   main.innerHTML = `<div class="head"><div><h1>System</h1><p>Health, generated Asterisk config, live Asterisk views and audit log.</p></div>
     <div class="actions"><button class="btn" id="reapply">Re-apply config to Asterisk</button></div></div>
     <div class="panel" style="margin-bottom:14px"><h2>Server resources <small id="resInfo" style="font-weight:400;color:var(--ink-3);font-size:12.5px"></small></h2><div class="body"><div class="grid kpis" id="res" style="margin-bottom:0">Loading…</div></div></div>
+    <div class="panel" style="margin-bottom:14px"><h2>Asterisk CLI log <small style="font-weight:400;color:var(--ink-3);font-size:12.5px">— what <span class="mono">asterisk -rvvv</span> shows · kept 5 days · search older lines in <a href="#/diag?tab=log">Diagnostics → Asterisk log</a></small></h2>
+      <form class="filters" id="clf" style="border-bottom:0"><label style="max-width:300px">Contains<input name="q" class="mono" placeholder="number, IP, C-0000001a, p_code…"></label>
+        <label style="max-width:120px">Lines<select name="lines"><option>100</option><option selected>300</option><option>1000</option></select></label>
+        <label class="check" style="max-width:none"><input type="checkbox" name="follow" checked> Follow (every 3 s)</label></form>
+      <div class="body" style="padding-top:0"><pre class="code logbox" id="cliLog" style="max-height:420px">Loading…</pre></div></div>
     <div class="panel" style="margin-bottom:14px"><h2>Health</h2><div class="body"><div class="health" id="health">Loading…</div></div></div>
     <div class="panel" style="margin-bottom:14px"><h2>Where the UI meets Asterisk</h2><div class="body"><div class="tw"><table>
       <thead><tr><th>UI action</th><th>Backend</th><th>Asterisk</th></tr></thead><tbody>
@@ -1392,6 +1398,19 @@ PAGES.system = async (main) => {
       r.disks.map((x) => tile(`Storage <span class="mono" style="text-transform:none;letter-spacing:0">${esc(x.mount)}</span>`, pct(x.used, x.total),
         `${gb(x.used)} used of ${gb(x.total)} · ${gb(x.available)} free <span class="mono" style="color:var(--ink-3)" title="${esc(x.device)}">${esc(x.fstype)}</span>`)).join('');
   };
+  // live Asterisk CLI log (full log: NOTICE / WARNING / ERROR / VERBOSE / DTMF); stays put while you scroll up
+  const clf = $('#clf'), logEl = $('#cliLog');
+  const cliLog = async () => {
+    const r = await api('GET', '/api/diag/log?' + new URLSearchParams({ q: clf.q.value.trim(), lines: clf.lines.value, levels: 'ERROR,WARNING,NOTICE,VERBOSE,DTMF' }));
+    const atEnd = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
+    logEl.innerHTML = r.lines.length ? r.lines.map((l) => `<span class="${LOG_CLS[(/\]\s+([A-Z]+)\[/.exec(l) || [])[1]] || ''}">${esc(l)}</span>`).join('\n') : 'No matching lines.';
+    if (atEnd) logEl.scrollTop = logEl.scrollHeight;
+  };
+  clf.addEventListener('submit', (e) => e.preventDefault());
+  clf.q.addEventListener('input', () => { clearTimeout(S.cliQ); S.cliQ = setTimeout(() => cliLog().catch(() => {}), 400); });
+  clf.lines.onchange = () => cliLog().catch(() => {});
+  clearInterval(S.cliTimer);
+  S.cliTimer = setInterval(() => { if (S.page !== 'system') clearInterval(S.cliTimer); else if (!document.hidden && clf.follow.checked) cliLog().catch(() => {}); }, 3000);
   clearInterval(S.resTimer);   // every 5 s while the System page is open
   S.resTimer = setInterval(() => { if (S.page !== 'system') clearInterval(S.resTimer); else if (!document.hidden) resources().catch(() => {}); }, 5000);
   const cfg = async () => {
@@ -1421,7 +1440,7 @@ PAGES.system = async (main) => {
     e.preventDefault(); $('#pwErr').textContent = '';
     try { await api('POST', '/api/system/password', formData(e.target)); e.target.reset(); toast('Password changed'); } catch (er) { $('#pwErr').textContent = er.message; }
   });
-  resources().catch((e) => ($('#res').textContent = e.message)); health().catch(() => {}); cfg().catch((e) => ($('#cfgCode').textContent = e.message)); cli('endpoints'); audit().catch(() => {});
+  resources().catch((e) => ($('#res').textContent = e.message)); cliLog().catch((e) => (logEl.textContent = e.message)); health().catch(() => {}); cfg().catch((e) => ($('#cfgCode').textContent = e.message)); cli('endpoints'); audit().catch(() => {});
 };
 
 boot();

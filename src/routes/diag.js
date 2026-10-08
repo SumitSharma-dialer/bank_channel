@@ -161,7 +161,7 @@ router.get('/log', wrap(async (req, res) => {
   const needle = str(req.query.q, 100).toLowerCase();
   const levels = String(req.query.levels || 'ERROR,WARNING,NOTICE').split(',').filter((l) => /^[A-Z]+$/.test(l));
   const lines = int(req.query.lines, { min: 50, max: 2000, def: 500 });
-  const maxBytes = 8 * 1024 * 1024;
+  const maxBytes = 32 * 1024 * 1024;   // the full log has verbose lines too
   let fh;
   try { fh = await fs.open(cfg.asterisk.log, 'r'); } catch (e) { throw new Bad(`cannot read ${cfg.asterisk.log}: ${e.code || e.message}`); }
   try {

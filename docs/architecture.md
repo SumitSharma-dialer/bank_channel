@@ -112,7 +112,7 @@ the trunk uses `[sd-from-trunk]` which rejects everything.
    No match → `INVALID`.
 3. Process selection:
    1. `CURL http://127.0.0.1:3000/internal/did-route?did=<DID>&from=<caller>` — the process that last called this
-      caller from this DID (last 90 days), else the process that last used this DID as caller ID;
+      caller from this DID (the query looks back 90 days, but `calls` only keeps 5 days — see [operations.md § Logs and data retention](operations.md#logs-and-data-retention)), else the process that last used this DID as caller ID;
    2. else the process the DID range is assigned to (`trunk_did_ranges.process_id`);
    3. else `NO_ROUTE`.
 4. Process inactive / inbound disabled → `BLOCKED`; no fixed IP → `NO_ROUTE`; inbound hours (`in_hours`) → `OFF_HOURS`;
