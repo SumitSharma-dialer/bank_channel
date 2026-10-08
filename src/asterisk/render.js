@@ -44,11 +44,19 @@ function timeGate(h, label, tz) {
   const zone = tz && TZ_RE.test(tz) ? `,${tz}` : '';
   return ` same => n,GotoIfTime(${h.from}-${h.to},${days.length === 7 ? '*' : days.join('&')},*,*${zone}?${label})
 ` +
-    ` same => n,Set(SD_DISP=OFF_HOURS)
- same => n,Hangup(20)
- same => n(${label}),NoOp(working time ${h.from}-${h.to} ${days.join(',')})
+    hangup('OFF_HOURS') +
+    ` same => n(${label}),NoOp(working time ${h.from}-${h.to} ${days.join(',')})
 `;
 }
+// SIP response the customer gets for each distributor reject (editable on the Dispositions page) -> Q.850 cause for
+// Hangup(); chan_pjsip turns the cause back into that SIP code.
+const SIP_CAUSE = { 403: 21, 404: 1, 408: 18, 480: 20, 484: 28, 486: 17, 488: 58, 500: 38, 502: 27, 503: 34 };
+const DEFAULT_REJECT = { CHANNEL_LIMIT: 503, TRUNK_LIMIT: 503, BLOCKED: 403, NO_ROUTE: 503, INVALID: 404,
+  OFF_HOURS: 480, NO_HEADER: 484, INVALID_DID: 403 };
+let rejectSip = DEFAULT_REJECT;   // set by renderDialplan() for the duration of one (synchronous) render
+const cause = (disp) => SIP_CAUSE[rejectSip[disp]] || SIP_CAUSE[DEFAULT_REJECT[disp]];
+const hangup = (disp, label) => ` same => n${label ? `(${label})` : ''},Set(SD_DISP=${disp})\n same => n,Hangup(${cause(disp)})\n`;
+
 const hoursOf = (v) => (typeof v === 'string' ? JSON.parse(v) : v) || null;
 
 function assertName(n, kind) {
@@ -156,9 +164,8 @@ const ENTRY = (code, trunkName) =>
   ` same => n,Set(SD_SRC=\${CHANNEL(pjsip,remote_addr)})\n` +
   ` same => n,Set(CHANNEL(hangup_handler_push)=sd-hangup,s,1)\n`;
 
-function reject(code, trunkName, disp, cause, comment) {
-  return `exten => _.,1,NoOp(${comment})\n` + ENTRY(code, trunkName) +
-    ` same => n,Set(SD_DISP=${disp})\n same => n,Hangup(${cause})\n`;
+function reject(code, trunkName, disp, comment) {
+  return `exten => _.,1,NoOp(${comment} -> ${rejectSip[disp]})\n` + ENTRY(code, trunkName) + hangup(disp);
 }
 
 // limits -> number -> caller ID -> Dial -> limit labels. num = dialplan expression of the number to send,
@@ -179,8 +186,8 @@ function dialTail(p, t, num, cliLines) {
     ` same => n,Set(SD_CLIOUT=\${CALLERID(num)})\n` +
     ` same => n,Dial(PJSIP/\${SD_OUT}@t_${t.name},${timeout})\n` +
     ` same => n,Hangup()\n` +
-    ` same => n(plimit),Set(SD_DISP=CHANNEL_LIMIT)\n same => n,Hangup(34)\n` +
-    (tmax > 0 ? ` same => n(tlimit),Set(SD_DISP=TRUNK_LIMIT)\n same => n,Hangup(34)\n` : '');
+    hangup('CHANNEL_LIMIT', 'plimit') +
+    (tmax > 0 ? hangup('TRUNK_LIMIT', 'tlimit') : '');
 }
 
 // Outbound = header dialing only: the client (identified by IP) dials the process's dummy number and sends
@@ -210,8 +217,7 @@ function headerCheck(t) {
     ` same => n,Set(SD_HST=ok)\n same => n,Set(SD_NUM=\${SD_CNUM})\n same => n,Set(SD_DIDUSED=\${SD_DID})\n` +
     ` same => n,Set(SD_DEST=\${SD_CNUM})\n same => n,Set(CALLERID(all)=\${SD_DID} <\${SD_DID}>)\n`;
 }
-const headerRejects = () => ` same => n(nohdr),Set(SD_DISP=NO_HEADER)\n same => n,Hangup(28)\n` +
-  ` same => n(baddid),Set(SD_DISP=INVALID_DID)\n same => n,Hangup(21)\n`;
+const headerRejects = () => hangup('NO_HEADER', 'nohdr') + hangup('INVALID_DID', 'baddid');
 
 // [sd-didok-<trunk>]: SD_DIDOK=1 when SD_DID (digits only) is inside one of the trunk's caller-ID ranges
 function didCheckContext(t) {
@@ -225,7 +231,10 @@ function didCheckContext(t) {
   return out + ` same => n,Return()\n same => n(ok),Set(SD_DIDOK=1)\n same => n,Return()\n\n`;
 }
 
-function renderDialplan(processes, trunks, tz, routeUrl) {
+// rejectCodes: { CHANNEL_LIMIT: 486, ... } SIP response per distributor disposition (missing = default)
+function renderDialplan(processes, trunks, tz, routeUrl, rejectCodes) {
+  rejectSip = { ...DEFAULT_REJECT };
+  for (const [d, c] of Object.entries(rejectCodes || {})) if (d in DEFAULT_REJECT && SIP_CAUSE[c]) rejectSip[d] = +c;
   const byId = new Map(trunks.map((t) => [t.id, t]));
   let out = HEADER('Process contexts (dialplan)') + hangupHandler();
 
@@ -236,9 +245,9 @@ function renderDialplan(processes, trunks, tz, routeUrl) {
     // and overwrites SD_DISP with INVALID
     out += `[proc-${p.code}]\n; ${clean(p.name)} — limit ${p.channel_limit}, trunk ${t ? t.name : '(none)'}\nexten => h,1,Hangup()\n`;
 
-    if (!p.active) { out += reject(p.code, t && t.name, 'BLOCKED', 21, 'process inactive -> 403') + '\n'; continue; }
-    if (p.allow_outbound === false) { out += reject(p.code, t && t.name, 'BLOCKED', 21, 'outbound calls disabled -> 403') + '\n'; continue; }
-    if (!t || !t.active) { out += reject(p.code, t && t.name, 'NO_ROUTE', 34, 'no active trunk -> 503') + '\n'; continue; }
+    if (!p.active) { out += reject(p.code, t && t.name, 'BLOCKED', 'process inactive') + '\n'; continue; }
+    if (p.allow_outbound === false) { out += reject(p.code, t && t.name, 'BLOCKED', 'outbound calls disabled') + '\n'; continue; }
+    if (!t || !t.active) { out += reject(p.code, t && t.name, 'NO_ROUTE', 'no active trunk') + '\n'; continue; }
 
     assertName(t.name, 'trunk');
     const dummy = String(p.dummy_cli || '');
@@ -251,7 +260,7 @@ function renderDialplan(processes, trunks, tz, routeUrl) {
     } else {
       out += `; WARNING: no valid dummy number - every call is rejected\n`;
     }
-    out += reject(p.code, t.name, 'INVALID', 1, 'dialed number is not the dummy number -> 404') + '\n';
+    out += reject(p.code, t.name, 'INVALID', 'dialed number is not the dummy number') + '\n';
   }
   for (const t of trunks.filter((x) => x.active)) {
     assertName(t.name, 'trunk');
@@ -298,7 +307,7 @@ function inboundContext(t, processes, tz, routeUrl) {
     if (d.w) cond.push(`\${SD_DID:-${d.w}} >= ${d.lo}`, `\${SD_DID:-${d.w}} <= ${d.hi}`);
     out += ` same => n,GotoIf($[${cond.join(' & ')}]?r${i})\n`;
   });
-  out += ` same => n,Set(SD_DISP=INVALID)\n same => n,Hangup(1)\n`;
+  out += hangup('INVALID');
   ranges.forEach(({ d, p }, i) => {
     if (p) assertName(p.code, 'process');
     out += ` same => n(r${i}),Set(SD_DIDM=\${SD_DID:-${d.len}})\n same => n,Set(SD_ASG=${p ? p.code : ''})\n same => n,Goto(found)\n`;
@@ -312,16 +321,16 @@ function inboundContext(t, processes, tz, routeUrl) {
     ` same => n,ExecIf($["\${SD_INPROC}" = ""]?Set(SD_INPROC=\${SD_ASG}))\n` +
     ` same => n,NoOp(DID \${SD_DIDM} from \${SD_CUST} -> process \${SD_INPROC})\n`;
   for (const p of processes) { assertName(p.code, 'process'); out += ` same => n,GotoIf($["\${SD_INPROC}" = "${p.code}"]?in_${p.code})\n`; }
-  out += ` same => n,Set(SD_DISP=NO_ROUTE)\n same => n,Hangup(34)\n`;
+  out += hangup('NO_ROUTE');
   for (const p of processes) {
     out += ` same => n(in_${p.code}),Set(SD_PROC=${p.code})\n`;
     const byIp = p.auth_type === 'ip';
     if (!p.active || p.allow_inbound === false) {
-      out += ` same => n,NoOp(${p.active ? 'inbound calls disabled' : 'process inactive'})\n same => n,Set(SD_DISP=BLOCKED)\n same => n,Hangup(21)\n`;
+      out += ` same => n,NoOp(${p.active ? 'inbound calls disabled' : 'process inactive'})\n` + hangup('BLOCKED');
       continue;
     }
     if (byIp && !ips(p.allowed_ips).some((i) => !i.includes('/'))) {
-      out += ` same => n,NoOp(process ${p.code} has no fixed IP to send calls to)\n same => n,Set(SD_DISP=NO_ROUTE)\n same => n,Hangup(34)\n`;
+      out += ` same => n,NoOp(process ${p.code} has no fixed IP to send calls to)\n` + hangup('NO_ROUTE');
       continue;
     }
     out += timeGate(hoursOf(p.in_hours), `in_${p.code}_open`, tz) +
@@ -333,8 +342,7 @@ function inboundContext(t, processes, tz, routeUrl) {
       ` same => n,Set(SD_CLIOUT=\${SD_DIDM})\n` +
       ` same => n,Dial(PJSIP/\${SD_OUT}@p_${p.code},${timeout},b(sd-inhdr^s^1(\${SD_DIDM},\${SD_CUST})))\n same => n,Hangup()\n`;
   }
-  out += ` same => n(plimit),Set(SD_DISP=CHANNEL_LIMIT)\n same => n,Hangup(34)\n` +
-    ` same => n(tlimit),Set(SD_DISP=TRUNK_LIMIT)\n same => n,Hangup(34)\n\n`;
+  out += hangup('CHANNEL_LIMIT', 'plimit') + hangup('TRUNK_LIMIT', 'tlimit') + '\n';
   return out;
 }
 
@@ -428,4 +436,4 @@ register => p_${p.code}:${pass}:${user}@${ip}:${sipPort}
   return { pjsip: pj.replace(/\n{3,}/g, '\n\n'), chan_sip: chanSip };
 }
 
-module.exports = { renderTrunks, renderProcesses, renderDialplan, peerConfig, didParts, NAME_RE };
+module.exports = { renderTrunks, renderProcesses, renderDialplan, peerConfig, didParts, NAME_RE, SIP_CAUSE, DEFAULT_REJECT };

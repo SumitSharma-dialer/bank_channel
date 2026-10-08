@@ -13,6 +13,9 @@ ExecStart=/usr/bin/env node --env-file=/opt/sipdist/.env src/server.js
 Restart=always
 RestartSec=3
 LimitNOFILE=65536
+# Diagnostics page runs tcpdump (SIP trace, pcap download, RTP analysis): it needs raw sockets.
+# Ambient capabilities still work with NoNewPrivileges (no setuid / file caps involved).
+AmbientCapabilities=CAP_NET_RAW
 NoNewPrivileges=true
 ProtectSystem=full
 ReadWritePaths=/etc/asterisk/sipdist

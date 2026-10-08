@@ -430,22 +430,50 @@ ALTER TABLE daily_stats ADD COLUMN IF NOT EXISTS invalid_did INT NOT NULL DEFAUL
 ALTER TABLE daily_stats DROP CONSTRAINT IF EXISTS daily_stats_scope_check;
 ALTER TABLE daily_stats ADD CONSTRAINT daily_stats_scope_check CHECK (scope IN ('process','trunk','did'));
 
-INSERT INTO dispositions(code,label,source,sip_code,sort) VALUES
-  ('ANSWERED',      'Answered',                       'trunk',       200, 1),
-  ('BUSY',          'Busy',                           'trunk',       486, 2),
-  ('NO_ANSWER',     'No answer',                      'trunk',       480, 3),
-  ('CANCEL',        'Cancelled by caller',            'trunk',       487, 4),
-  ('CONGESTION',    'Congestion',                     'trunk',       503, 5),
-  ('FAILED',        'Failed / unavailable',           'trunk',       500, 6),
-  ('CHANNEL_LIMIT', 'Rejected: process limit',        'distributor', 503, 7),
-  ('TRUNK_LIMIT',   'Rejected: trunk limit',          'distributor', 503, 8),
-  ('BLOCKED',       'Rejected: inactive / direction off', 'distributor', 403, 9),
-  ('NO_ROUTE',      'Rejected: no active trunk',      'distributor', 503, 10),
-  ('INVALID',       'Rejected: invalid number',       'distributor', 404, 11),
-  ('OFF_HOURS',     'Rejected: outside working time', 'distributor', 480, 12),
-  ('NO_HEADER',     'Rejected: DID/number header missing', 'distributor', 484, 13),
-  ('INVALID_DID',   'Rejected: DID not on trunk',     'distributor', 403, 14)
-ON CONFLICT (code) DO UPDATE SET label=EXCLUDED.label, source=EXCLUDED.source,
-  sip_code=EXCLUDED.sip_code, sort=EXCLUDED.sort;
+-- SIP_DOWN: trunk (or customer, inbound) unreachable - Dial() returned CHANUNAVAIL
+ALTER TABLE daily_stats ADD COLUMN IF NOT EXISTS sip_down INT NOT NULL DEFAULT 0;
+-- custom_code: admin-editable code shown in the UI, CSV and reports instead of the internal code ('' = the code).
+-- First time the column is added, CHANNEL_LIMIT is shown as LIMIT_REACH.
+DO $$BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                 WHERE table_schema = current_schema() AND table_name = 'dispositions' AND column_name = 'custom_code') THEN
+    ALTER TABLE dispositions ADD COLUMN custom_code VARCHAR(16) NOT NULL DEFAULT '';
+    UPDATE dispositions SET custom_code = 'LIMIT_REACH' WHERE code = 'CHANNEL_LIMIT';
+  END IF;
+END$$;
+
+-- Diagnostics issue tracker: one row per problem, open while closed_at IS NULL (src/diag/issues.js)
+CREATE TABLE IF NOT EXISTS diag_issues (
+  id         BIGSERIAL PRIMARY KEY,
+  key        VARCHAR(80) NOT NULL,                 -- e.g. sip_down:<trunk>, limit:<process>
+  severity   VARCHAR(8) NOT NULL CHECK (severity IN ('critical','warning')),
+  title      VARCHAR(160) NOT NULL,
+  detail     TEXT,
+  hint       TEXT,
+  opened_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  closed_at  TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS diag_issues_opened_idx ON diag_issues(opened_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS diag_issues_open_uidx ON diag_issues(key) WHERE closed_at IS NULL;
+
+-- label, sip_code and custom_code are editable in the UI (Dispositions page): only set them for new rows
+INSERT INTO dispositions(code,label,source,sip_code,sort,custom_code) VALUES
+  ('ANSWERED',      'Answered',                       'trunk',       200, 1, ''),
+  ('BUSY',          'Busy',                           'trunk',       486, 2, ''),
+  ('NO_ANSWER',     'No answer',                      'trunk',       480, 3, ''),
+  ('CANCEL',        'Cancelled by caller',            'trunk',       487, 4, ''),
+  ('CONGESTION',    'Congestion',                     'trunk',       503, 5, ''),
+  ('FAILED',        'Failed / unavailable',           'trunk',       500, 6, ''),
+  ('CHANNEL_LIMIT', 'Rejected: process limit',        'distributor', 503, 7, 'LIMIT_REACH'),
+  ('TRUNK_LIMIT',   'Rejected: trunk limit',          'distributor', 503, 8, ''),
+  ('BLOCKED',       'Rejected: inactive / direction off', 'distributor', 403, 9, ''),
+  ('NO_ROUTE',      'Rejected: no active trunk',      'distributor', 503, 10, ''),
+  ('INVALID',       'Rejected: invalid number',       'distributor', 404, 11, ''),
+  ('OFF_HOURS',     'Rejected: outside working time', 'distributor', 480, 12, ''),
+  ('NO_HEADER',     'Rejected: DID/number header missing', 'distributor', 484, 13, ''),
+  ('INVALID_DID',   'Rejected: DID not on trunk',     'distributor', 403, 14, ''),
+  ('SIP_DOWN',      'SIP down / unreachable',         'trunk',       503, 15, '')
+ON CONFLICT (code) DO UPDATE SET source=EXCLUDED.source, sort=EXCLUDED.sort;
 
 COMMIT;
