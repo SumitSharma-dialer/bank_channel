@@ -6,7 +6,7 @@ const cfg = require('./config');
 const redis = require('./redis');
 const ari = require('./ari');
 const { q } = require('./db');
-const { disposition } = require('./disposition');
+const { disposition, setRules } = require('./disposition');
 
 const bus = new EventEmitter();          // 'hit', 'call', 'snapshot'
 const CH_RE = /^PJSIP\/([pt])_([a-z0-9_]{2,32})-[0-9a-f]+$/;
@@ -24,6 +24,9 @@ async function refreshMeta() {
     q('SELECT id,name,max_channels,active,register,host FROM trunks ORDER BY name'),
   ]);
   meta = { processes: p.rows, trunks: t.rows };
+  // hangup cause rules (Dispositions page); a missing table (db:init not run yet) keeps the defaults
+  const r = await q('SELECT cause,status,disposition FROM cause_rules').catch(() => null);
+  if (r) setRules(r.rows);
 }
 
 // ------------------------------------------------------------- live counters

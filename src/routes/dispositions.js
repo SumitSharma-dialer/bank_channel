@@ -2,7 +2,9 @@
 // Custom dispositions: each internal code (CHANNEL_LIMIT, SIP_DOWN, ...) can get its own display code
 // (e.g. LIMIT_REACH) and label; distributor rejects can also change the SIP response the customer receives.
 const router = require('express').Router();
-const { q, audit } = require('../db');
+const { q, pool, audit } = require('../db');
+const { CAUSE_STATUSES, CAUSE_TARGETS } = require('../disposition');
+const tracker = require('../tracker');
 const { apply } = require('../asterisk/apply');
 const { SIP_CAUSE } = require('../asterisk/render');
 const { Bad, wrap, str, int } = require('./util');
@@ -11,7 +13,41 @@ const CODE_RE = /^[A-Z][A-Z0-9_]{1,15}$/;
 
 router.get('/', wrap(async (req, res) => {
   res.json({ rows: (await q('SELECT code, label, source, sip_code, sort, custom_code FROM dispositions ORDER BY sort')).rows,
-    sipCodes: Object.keys(SIP_CAUSE).map(Number) });
+    sipCodes: Object.keys(SIP_CAUSE).map(Number),
+    causeRules: (await q('SELECT cause, status, disposition FROM cause_rules ORDER BY cause, status')).rows,
+    causeStatuses: CAUSE_STATUSES, causeTargets: CAUSE_TARGETS });
+}));
+
+// hangup cause rules: the whole list is replaced (before /:code, which would match "cause-rules")
+router.put('/cause-rules', wrap(async (req, res) => {
+  const list = Array.isArray(req.body.rules) ? req.body.rules : null;
+  if (!list) throw new Bad('rules: list expected');
+  if (list.length > 500) throw new Bad('at most 500 rules');
+  const rules = list.map((r) => ({
+    cause: int(r.cause, { min: 1, max: 127 }),
+    status: CAUSE_STATUSES.includes(r.status) ? r.status : null,
+    disposition: CAUSE_TARGETS.includes(r.disposition) ? r.disposition : null,
+  }));
+  for (const r of rules) {
+    if (!r.status) throw new Bad(`cause ${r.cause}: status must be one of ${CAUSE_STATUSES.join(', ')}`);
+    if (!r.disposition) throw new Bad(`cause ${r.cause}: disposition must be one of ${CAUSE_TARGETS.join(', ')}`);
+  }
+  const seen = new Set();
+  for (const r of rules) {
+    const k = `${r.cause} ${r.status}`;
+    if (seen.has(k)) throw new Bad(`cause ${r.cause} with status ${r.status} is listed twice`);
+    seen.add(k);
+  }
+  const c = await pool.connect();
+  try {
+    await c.query('BEGIN');
+    await c.query('DELETE FROM cause_rules');
+    for (const r of rules) await c.query('INSERT INTO cause_rules(cause,status,disposition) VALUES($1,$2,$3)', [r.cause, r.status, r.disposition]);
+    await c.query('COMMIT');
+  } catch (e) { await c.query('ROLLBACK'); throw e; } finally { c.release(); }
+  await audit(req.user, 'update', 'cause_rules', null, { rules: rules.length });
+  await tracker.refreshMeta();          // new calls use the rules right away
+  res.json({ ok: true, rules: rules.length });
 }));
 
 router.put('/:code', wrap(async (req, res) => {

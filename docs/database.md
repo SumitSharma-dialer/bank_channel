@@ -90,6 +90,18 @@ daily_stats (day, scope, ref)     ref = process code | trunk name | DID
 Ranges may not overlap within or across trunks (checked in `routes/trunks.js`). Assigning DIDs to a process splits and
 re-merges ranges (`assignDids` in `routes/processes.js`).
 
+### `cause_rules` — hangup cause → disposition (Dispositions page)
+
+| column | type | notes |
+|---|---|---|
+| cause | int 1–127 | Q.850 / ISDN hangup cause |
+| status | varchar(16) | DIALSTATUS the rule applies to: `ANY` (= CANCEL, NOANSWER, BUSY, CONGESTION), or one of those, or `CHANUNAVAIL` |
+| disposition | varchar(16) | `NO_ANSWER` / `BUSY` / `CANCEL` / `CONGESTION` / `FAILED` / `SIP_DOWN` |
+
+Primary key `(cause, status)`; an exact-status rule wins over `ANY`; no rule = the DIALSTATUS result. Only unanswered calls are
+changed. Seeded once when the table is created (`DEFAULT_RULES` in `src/disposition.js`); `PUT /api/dispositions/cause-rules`
+replaces the whole list and the tracker uses it for the next call.
+
 ### `calls` — own CDR, one row per customer/inbound call (written from `SIPDIST_END`)
 | Column | Notes |
 |---|---|

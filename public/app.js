@@ -913,7 +913,12 @@ const Q850 = { 1: 'unallocated number', 3: 'no route to destination', 16: 'norma
 
 PAGES.dispositions = async (main) => {
   main.innerHTML = `<div class="head"><div><h1>Dispositions</h1><p>Give any disposition your own code (shown in CDR, CSV, stats and the live feed) and choose the SIP response the customer gets when the distributor rejects a call.</p></div></div>
-    <div class="panel"><div class="tw"><table><thead><tr><th>Internal code</th><th>Shown as</th><th>Label</th><th>Set by</th><th>SIP response</th><th>Meaning</th><th></th></tr></thead><tbody id="dBody"></tbody></table></div></div>`;
+    <div class="panel"><div class="tw"><table><thead><tr><th>Internal code</th><th>Shown as</th><th>Label</th><th>Set by</th><th>SIP response</th><th>Meaning</th><th></th></tr></thead><tbody id="dBody"></tbody></table></div></div>
+    <div class="panel"><h2>ISDN cause rules</h2>
+      <p class="hint">Unanswered calls: the hangup cause (Q.850) and the call status decide the disposition. <b>ANY</b> = CANCEL, NOANSWER, BUSY or CONGESTION; a rule for the exact status wins over ANY. CHANUNAVAIL stays SIP_DOWN unless a rule names it. No rule = the status as reported. Answered calls and the distributor's own rejects are never changed. Applies to new calls.</p>
+      <div class="tw"><table><thead><tr><th>ISDN cause</th><th>Call status</th><th>Disposition</th><th></th></tr></thead><tbody id="crBody"></tbody></table></div>
+      <div class="mfoot" style="justify-content:space-between"><button type="button" class="btn sm" id="crAdd">+ Add rule</button>
+        <span><span class="err" id="crErr"></span> <button type="button" class="btn primary" id="crSave">Save rules</button></span></div></div>`;
   const load = async () => {
     const r = await api('GET', '/api/dispositions');
     S.dispositions = r.rows;
@@ -924,6 +929,31 @@ PAGES.dispositions = async (main) => {
       <td style="font-size:12.5px;color:var(--ink-2);max-width:380px">${esc(DISP_HELP[d.code] || '')}</td>
       <td class="r"><button class="btn sm" data-edit="${esc(d.code)}">Edit</button></td></tr>`).join('');
     $$('[data-edit]').forEach((b) => (b.onclick = () => edit(r.rows.find((x) => x.code === b.dataset.edit), r.sipCodes)));
+    causeRules(r);
+  };
+  // ISDN cause -> disposition rules: rows edited in place, the whole list is saved at once
+  const causeRules = (r) => {
+    const body = $('#crBody');
+    const opts = (list, sel) => list.map((x) => `<option ${x === sel ? 'selected' : ''}>${esc(x)}</option>`).join('');
+    const row = (x = { status: 'ANY', disposition: 'NO_ANSWER' }) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td><input class="mono cr-cause" type="number" min="1" max="127" value="${x.cause || ''}" style="width:90px" required></td>
+        <td><select class="cr-status">${opts(r.causeStatuses, x.status)}</select></td>
+        <td><select class="cr-disp">${opts(r.causeTargets, x.disposition)}</select></td>
+        <td class="r"><button type="button" class="btn sm danger" title="Remove">✕</button></td>`;
+      $('button', tr).onclick = () => tr.remove();
+      body.appendChild(tr);
+      return tr;
+    };
+    body.innerHTML = '';
+    r.causeRules.forEach((x) => row(x));
+    $('#crAdd').onclick = () => $('.cr-cause', row()).focus();
+    $('#crSave').onclick = async () => {
+      $('#crErr').textContent = '';
+      const rules = $$('#crBody tr').map((tr) => ({ cause: $('.cr-cause', tr).value.trim(), status: $('.cr-status', tr).value, disposition: $('.cr-disp', tr).value }));
+      try { const res = await api('PUT', '/api/dispositions/cause-rules', { rules }); toast(`${res.rules} cause rules saved`); load(); }
+      catch (e) { $('#crErr').textContent = e.message; }
+    };
   };
   const edit = (d, sipCodes) => openModal(`Disposition ${d.code}`, `<form class="mbody" id="df">
       <label>Shown as <small>custom code, A-Z 0-9 _ (empty = ${esc(d.code)})</small><input name="custom_code" class="mono" maxlength="16" value="${esc(d.custom_code || '')}" placeholder="${esc(d.code)}" style="text-transform:uppercase"></label>

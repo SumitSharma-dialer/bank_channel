@@ -9,39 +9,35 @@ const OWN = new Set(['ANSWERED', 'BUSY', 'NO_ANSWER', 'CANCEL', 'CONGESTION', 'F
 
 // Q.850 / ISDN hangup cause -> disposition, for calls that were not answered. DIALSTATUS alone misleads: a
 // customer dialer that gives up after ringing sends CANCEL with cause 19, which is a no-answer, not a cancel.
-// Not listed (16 normal clearing, 127 interworking, ...) = keep what DIALSTATUS says.
-const CAUSE_MAP = {
-  1: 'FAILED',        // unallocated / unassigned number
-  3: 'FAILED',        // no route to destination
-  17: 'BUSY',         // user busy
-  18: 'NO_ANSWER',    // no user responding
-  19: 'NO_ANSWER',    // no answer from user (user alerted)
-  20: 'NO_ANSWER',    // subscriber absent (switched off / out of coverage)
-  21: 'BUSY',         // call rejected (callee declined)
-  22: 'FAILED',       // number changed
-  27: 'FAILED',       // destination out of order
-  28: 'FAILED',       // invalid number format
-  31: 'CANCEL',       // normal, unspecified: call dropped before answer
-  34: 'CONGESTION',   // no circuit/channel available
-  38: 'CONGESTION',   // network out of order
-  41: 'CONGESTION',   // temporary failure
-  42: 'CONGESTION',   // switching equipment congestion
-  44: 'CONGESTION',   // requested channel not available
-  47: 'CONGESTION',   // resource unavailable
-  58: 'CONGESTION',   // bearer capability not presently available
-  102: 'NO_ANSWER',   // recovery on timer expiry
-};
-// only these DIALSTATUS results are refined by the cause; CHANUNAVAIL stays SIP_DOWN (trunk problem), ANSWER stays
-const BY_CAUSE = new Set(['CANCEL', 'NOANSWER', 'BUSY', 'CONGESTION']);
+// Rules are edited on the Dispositions page (table cause_rules); DEFAULT_RULES seed it and apply until it is loaded.
+// status = the DIALSTATUS the rule applies to; ANY = any unanswered result except CHANUNAVAIL (kept as SIP_DOWN unless a
+// rule names it). An exact-status rule wins over ANY. No rule = keep what DIALSTATUS says.
+const CAUSE_STATUSES = ['ANY', 'CANCEL', 'NOANSWER', 'BUSY', 'CONGESTION', 'CHANUNAVAIL'];
+const CAUSE_TARGETS = ['NO_ANSWER', 'BUSY', 'CANCEL', 'CONGESTION', 'FAILED', 'SIP_DOWN'];
+const ANY = new Set(['CANCEL', 'NOANSWER', 'BUSY', 'CONGESTION']);
+const DEFAULT_RULES = [
+  [1, 'FAILED'], [3, 'FAILED'], [17, 'BUSY'], [18, 'NO_ANSWER'], [19, 'NO_ANSWER'], [20, 'NO_ANSWER'], [21, 'BUSY'],
+  [22, 'FAILED'], [27, 'FAILED'], [28, 'FAILED'], [31, 'CANCEL'], [34, 'CONGESTION'], [38, 'CONGESTION'],
+  [41, 'CONGESTION'], [42, 'CONGESTION'], [44, 'CONGESTION'], [47, 'CONGESTION'], [58, 'CONGESTION'], [102, 'NO_ANSWER'],
+].map(([cause, disposition]) => ({ cause, status: 'ANY', disposition }))
+  // a carrier reject after ringing (480 + cause 31) comes back as CHANUNAVAIL; it is a cancel, not a dead trunk
+  .concat({ cause: 31, status: 'CHANUNAVAIL', disposition: 'CANCEL' });
+
+let rules = new Map();
+function setRules(list) {
+  rules = new Map(list.map((r) => [`${+r.cause}:${r.status}`, r.disposition]));
+}
+setRules(DEFAULT_RULES);
 
 function disposition(raw, cause) {
   const d = String(raw || '').toUpperCase();
   const c = parseInt(cause, 10);
-  if (BY_CAUSE.has(d) && CAUSE_MAP[c]) return CAUSE_MAP[c];
-  // a carrier reject after ringing (480 + cause 31) comes back as CHANUNAVAIL; it is a cancel, not a dead trunk
-  if (d === 'CHANUNAVAIL' && c === 31) return 'CANCEL';
+  if (c && (ANY.has(d) || d === 'CHANUNAVAIL')) {
+    const hit = rules.get(`${c}:${d}`) || (ANY.has(d) && rules.get(`${c}:ANY`));
+    if (hit) return hit;
+  }
   if (OWN.has(d)) return d;
   return DIAL_MAP[d] || 'FAILED';
 }
 
-module.exports = { disposition, OWN };
+module.exports = { disposition, setRules, DEFAULT_RULES, CAUSE_STATUSES, CAUSE_TARGETS, OWN };

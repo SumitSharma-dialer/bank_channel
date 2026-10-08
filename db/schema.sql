@@ -178,6 +178,27 @@ DO $$DECLARE c record; BEGIN  -- leftover NOT NULL columns from an older version
   END LOOP; END$$;
 
 
+-- ------------------------------------------------------------ cause_rules
+-- Q.850 hangup cause -> disposition for unanswered calls, edited on the Dispositions page (src/disposition.js).
+-- status = DIALSTATUS the rule applies to; ANY = CANCEL/NOANSWER/BUSY/CONGESTION. Seeded once, when created.
+DO $$BEGIN
+  IF to_regclass('cause_rules') IS NULL THEN
+    CREATE TABLE cause_rules (
+      cause        INT NOT NULL CHECK (cause BETWEEN 1 AND 127),
+      status       VARCHAR(16) NOT NULL DEFAULT 'ANY' CHECK (status IN ('ANY','CANCEL','NOANSWER','BUSY','CONGESTION','CHANUNAVAIL')),
+      disposition  VARCHAR(16) NOT NULL CHECK (disposition IN ('NO_ANSWER','BUSY','CANCEL','CONGESTION','FAILED','SIP_DOWN')),
+      PRIMARY KEY (cause, status)
+    );
+    INSERT INTO cause_rules(cause, status, disposition) VALUES
+      (1,'ANY','FAILED'), (3,'ANY','FAILED'), (17,'ANY','BUSY'), (18,'ANY','NO_ANSWER'), (19,'ANY','NO_ANSWER'),
+      (20,'ANY','NO_ANSWER'), (21,'ANY','BUSY'), (22,'ANY','FAILED'), (27,'ANY','FAILED'), (28,'ANY','FAILED'),
+      (31,'ANY','CANCEL'), (31,'CHANUNAVAIL','CANCEL'), (34,'ANY','CONGESTION'), (38,'ANY','CONGESTION'),
+      (41,'ANY','CONGESTION'), (42,'ANY','CONGESTION'), (44,'ANY','CONGESTION'), (47,'ANY','CONGESTION'),
+      (58,'ANY','CONGESTION'), (102,'ANY','NO_ANSWER');
+  END IF;
+END$$;
+
+
 -- ----------------------------------------------------------------- calls
 -- Our own CDR: one row per call, written by the backend from the SIPDIST_END event.
 SELECT pg_temp.sd_legacy('calls', ARRAY['id','linkedid','process_id','process_code','trunk_id','trunk_name','src_ip','cli_in','cli_out','dialed','sent_number','disposition','dialstatus','hangup_cause','start_time','answer_time','end_time','ring_sec','bill_sec','duration']);
