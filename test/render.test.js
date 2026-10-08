@@ -21,15 +21,17 @@ test('inactive trunk is not rendered', () => {
 
 test('password process uses auth_username identification', () => {
   const p = renderProcesses([proc]);
-  assert.ok(p.includes('identify_by=auth_username,username'));
+  assert.ok(p.includes('identify_by=ip,auth_username,username'));
   assert.ok(p.includes('[p_acme-auth]') && p.includes('password=secret123'));
 });
 
-test('password process with IPs is locked to them, without identify by IP', () => {
+test('password process with IPs is locked to them and identified by its own fixed IPs only', () => {
   const p = renderProcesses([{ ...proc, allowed_ips: '1.2.3.4,5.6.7.0/24' }]);
   assert.ok(p.includes('deny=0.0.0.0/0.0.0.0\npermit=1.2.3.4\npermit=5.6.7.0/24\n'));
-  assert.ok(!p.includes('-identify]') && p.includes('[p_acme-auth]'));
+  assert.ok(p.includes('[p_acme-identify]\ntype=identify\nendpoint=p_acme\nmatch=1.2.3.4\n\n') && p.includes('[p_acme-auth]'));
   assert.ok(!renderProcesses([proc]).includes('deny='), 'no IPs = any IP');
+  const shared = renderProcesses([{ ...proc, allowed_ips: '1.2.3.4' }, { ...proc, code: 'beta', sip_username: 'beta', allowed_ips: '1.2.3.4' }]);
+  assert.ok(!shared.includes('-identify]'), 'an IP shared by password processes identifies none of them');
 });
 
 test('active ip process gets a monitor-only AOR + endpoint that pings fixed IPs but is never identified', () => {

@@ -102,6 +102,12 @@ function renderTrunks(trunks) {
 // ------------------------------------------------------------- processes.conf
 function renderProcesses(processes) {
   let out = HEADER('Customer Asterisk servers = processes (pjsip)');
+  // Asterisk's username / auth_username identifiers match the From / Authorization user against the endpoint NAME
+  // (p_<code>), not against the auth username — a customer sending From: <sip_username> is never identified and gets
+  // 401 forever. A password process whose fixed IP no other process uses is therefore also identified by that IP
+  // (its password is still checked); shared IPs rely on the customer sending from_user=p_<code> (see peerConfig).
+  const ipUse = new Map();
+  for (const p of processes) for (const i of ips(p.allowed_ips)) ipUse.set(i, (ipUse.get(i) || 0) + 1);
   for (const p of processes) {
     assertName(p.code, 'process');
     const id = `p_${p.code}`;
@@ -127,7 +133,7 @@ function renderProcesses(processes) {
       `disallow=all\nallow=${codecs(p.codecs)}\n` +
       `direct_media=no\nrtp_symmetric=yes\nforce_rport=yes\nrewrite_contact=yes\n` +
       `trust_id_inbound=yes\ntimers=no\nallow_subscribe=no\n` +
-      (byIp ? `identify_by=ip\n` : `identify_by=auth_username,username\nauth=${id}-auth\n` +
+      (byIp ? `identify_by=ip\n` : `identify_by=ip,auth_username,username\nauth=${id}-auth\n` +
         // optional IP lock for password auth: requests from any other IP are refused
         (ips(p.allowed_ips).length ? `deny=0.0.0.0/0.0.0.0\n` + ips(p.allowed_ips).map((i) => `permit=${i}\n`).join('') : '')) + '\n';
     if (byIp) {
@@ -139,6 +145,8 @@ function renderProcesses(processes) {
       }
     } else {
       out += `[${id}-auth]\ntype=auth\nauth_type=userpass\nusername=${clean(p.sip_username)}\npassword=${clean(p.sip_password)}\n\n`;
+      const own = ips(p.allowed_ips).filter((i) => !i.includes('/') && ipUse.get(i) === 1);
+      if (own.length) out += `[${id}-identify]\ntype=identify\nendpoint=${id}\n` + own.map((i) => `match=${i}\n`).join('') + '\n';
     }
   }
   return out;
@@ -408,7 +416,7 @@ disallow=all
 allow=ulaw,alaw
 aors=sipdist
 direct_media=no
-${byIp ? '' : `outbound_auth=sipdist-auth\nfrom_user=${user}\n`}
+${byIp ? '' : `outbound_auth=sipdist-auth\nfrom_user=p_${p.code}\n`}
 [sipdist-identify]
 type=identify
 endpoint=sipdist
@@ -450,7 +458,7 @@ exten => _X.,1,NoOp(inbound call from \${EXTEN} to DID \${CALLERID(num)})
 type=friend
 host=${ip}
 port=${sipPort}
-${byIp ? '' : `username=${user}\nsecret=${pass}\nfromuser=${user}\n`}context=from-sipdist
+${byIp ? '' : `username=${user}\nsecret=${pass}\nfromuser=p_${p.code}\n`}context=from-sipdist
 disallow=all
 allow=ulaw
 allow=alaw

@@ -13,7 +13,7 @@ Chosen per process with **Authentication** in Add / Edit process (`processes.aut
 
 | | By server IP (`ip`) | Username + password (`password`) |
 |---|---|---|
-| How Asterisk recognises the customer | source IP of the INVITE (`[p_<code>-identify] match=`) | SIP digest login (`[p_<code>-auth]`, `identify_by=auth_username,username`) |
+| How Asterisk recognises the customer | source IP of the INVITE (`[p_<code>-identify] match=`) | SIP digest login (`[p_<code>-auth]`, `identify_by=ip,auth_username,username`; From user must be `p_<code>`, or a fixed allowed IP no other process uses) |
 | Customer server IPs | **required**; each IP belongs to one process only | optional **IP lock**: if set, the login works only from these IPs (`deny=0.0.0.0/0.0.0.0` + `permit=`); blank = any IP |
 | Customer SIP port | where inbound DID calls and the online check are sent (`<first fixed IP>:<port>`) | saved and shown only; calls go to the port the customer **registered** from |
 | Customer registers? | no | yes — needed to show **online** and to receive inbound DID calls / callbacks |
