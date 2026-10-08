@@ -2,12 +2,56 @@
 // Diagnostics: issue tracker, live SIP trace (sngrep-like), pcap download (tcpdump), RTP analysis, Asterisk log search.
 const router = require('express').Router();
 const fs = require('fs/promises');
+const dns = require('dns').promises;
+const { execFile } = require('child_process');
 const cfg = require('../config');
 const ari = require('../ari');
-const { audit } = require('../db');
+const { q, audit } = require('../db');
 const cap = require('../diag/capture');
 const issues = require('../diag/issues');
 const { Bad, wrap, str, int } = require('./util');
+
+// Capture target -> IPs. target: '' (all) | 'ip' (+ host) | 'trunk:<name>' | 'process:<code>'
+const IP_RE = /^(?:\d{1,3}(?:\.\d{1,3}){3}(?:\/\d{1,2})?|[0-9a-fA-F:]{2,39})$/;
+const contactIps = (endpoint) => new Promise((resolve) => {
+  execFile('asterisk', ['-rx', 'pjsip show contacts'], { timeout: 4000 }, (err, out) => {
+    const ips = new Set();
+    // "Contact:  p_acme/sip:acme@203.0.113.5:5060;ob   a1b2c3 Avail  12.3"
+    for (const m of String(out || '').matchAll(new RegExp(`${endpoint}/sips?:(?:[^@\\s;]*@)?\\[?([0-9a-fA-F.:]+?)\\]?(?::\\d+)?[;\\s]`, 'g'))) ips.add(m[1]);
+    resolve([...ips]);
+  });
+});
+async function target(src) {
+  const t = str(src.target, 40), host = str(src.host, 43);
+  if (!t) return { hosts: [], name: '' };
+  if (t === 'ip') {
+    if (!IP_RE.test(host)) throw new Bad('enter an IP address or CIDR, e.g. 203.0.113.5 or 203.0.113.0/24');
+    return { hosts: [host], name: host.replace(/[/:]/g, '_') };
+  }
+  const [kind, ref] = t.split(':');
+  if (kind === 'trunk') {
+    const tr = (await q('SELECT name, host FROM trunks WHERE name=$1', [ref])).rows[0];
+    if (!tr) throw new Bad('unknown trunk');
+    let hosts = IP_RE.test(tr.host) ? [tr.host] : [];
+    if (!hosts.length) {
+      try { hosts = (await dns.lookup(tr.host, { all: true })).map((a) => a.address); }
+      catch (e) { throw new Bad(`cannot resolve trunk host ${tr.host}: ${e.code || e.message}`); }
+    }
+    return { hosts, name: `trunk_${tr.name}` };
+  }
+  if (kind === 'process') {
+    const p = (await q('SELECT code, auth_type, allowed_ips FROM processes WHERE code=$1', [ref])).rows[0];
+    if (!p) throw new Bad('unknown process');
+    let hosts = p.auth_type === 'ip' ? String(p.allowed_ips || '').split(/[\s,]+/).filter((x) => IP_RE.test(x)) : [];
+    if (!hosts.length) hosts = await contactIps(`p_${p.code}`);   // password auth: where it registered from
+    if (!hosts.length) throw new Bad(`process ${p.code} has no allowed IP and is not registered — use "Custom IP"`);
+    return { hosts, name: `proc_${p.code}` };
+  }
+  throw new Bad('unknown capture target');
+}
+
+// resolve a target without capturing (the UI shows which IPs will be captured)
+router.get('/target', wrap(async (req, res) => res.json(await target(req.query))));
 
 router.get('/status', wrap(async (req, res) => {
   res.json({ tools: cap.tools(), trace: cap.trace.status(), rtpRange: cfg.rtp, sipPort: cfg.sipPort, log: cfg.asterisk.log });
@@ -19,9 +63,10 @@ router.post('/issues/run', wrap(async (req, res) => { await issues.run(); res.js
 
 // ------------------------------------------------------------------ SIP trace
 router.post('/sip/start', wrap(async (req, res) => {
-  const o = { minutes: int(req.body.minutes, { min: 1, max: 60, def: 10 }), host: str(req.body.host, 43), keepNoise: !!req.body.keepNoise };
+  const tg = await target(req.body);
+  const o = { minutes: int(req.body.minutes, { min: 1, max: 60, def: 10 }), hosts: tg.hosts, label: tg.name, keepNoise: !!req.body.keepNoise };
   const st = cap.trace.start(o);
-  await audit(req.user, 'sip_trace', 'diag', null, o);
+  await audit(req.user, 'sip_trace', 'diag', null, { ...o, target: req.body.target || 'all' });
   res.json(st);
 }));
 router.post('/sip/stop', (req, res) => res.json(cap.trace.stop()));
@@ -46,8 +91,9 @@ router.get('/sip/dialog.pcap', (req, res) => {
 
 // ------------------------------------------------------------------ tcpdump download
 router.get('/pcap', wrap(async (req, res) => {
-  const o = { seconds: int(req.query.seconds, { min: 1, max: 300, def: 30 }), host: str(req.query.host, 43), port: str(req.query.port, 5),
-    sip: req.query.sip !== '0', rtp: req.query.rtp === '1' };
+  const tg = await target(req.query);
+  const o = { seconds: int(req.query.seconds, { min: 1, max: 300, def: 30 }), hosts: tg.hosts, name: tg.name, port: str(req.query.port, 5),
+    sip: req.query.sip !== '0', rtp: req.query.rtp === '1', tool: req.query.tool === 'sngrep' ? 'sngrep' : 'tcpdump', match: str(req.query.match, 64) };
   if (!o.sip && !o.rtp && !o.port) throw new Bad('choose SIP, RTP or a port');
   await audit(req.user, 'pcap', 'diag', null, o);
   await cap.download(res, o);
@@ -55,7 +101,8 @@ router.get('/pcap', wrap(async (req, res) => {
 
 // ------------------------------------------------------------------ RTP
 router.post('/rtp/capture', wrap(async (req, res) => {
-  res.json(await cap.rtpCapture({ seconds: int(req.body.seconds, { min: 2, max: 60, def: 10 }), host: str(req.body.host, 43) }));
+  const tg = await target(req.body);
+  res.json(await cap.rtpCapture({ seconds: int(req.body.seconds, { min: 2, max: 60, def: 10 }), hosts: tg.hosts }));
 }));
 
 // Asterisk's own RTP counters for every live channel (ARI GET /channels/{id}/rtp_statistics)

@@ -844,7 +844,7 @@ PAGES.diag = async (main) => {
     <div class="tabs big" id="dTabs">${DIAG_TABS.map(([k, l]) => `<button data-t="${k}">${l}</button>`).join('')}</div><div id="dBodyMain"></div>`;
   try {
     const [tr, pr] = await Promise.all([api('GET', '/api/trunks'), api('GET', '/api/processes')]);
-    Diag.names = {};
+    Diag.names = {}; Diag.trunks = tr; Diag.procs = pr;
     for (const p of pr) for (const ip of String(p.allowed_ips || '').split(/[\s,]+/).filter((x) => x && !x.includes('/'))) Diag.names[ip] = `proc ${p.code}`;
     for (const t of tr) Diag.names[t.host] = `trunk ${t.name}`;
     if (S.me.publicIp) Diag.names[S.me.publicIp] = 'SIPDist';
@@ -860,6 +860,28 @@ PAGES.diag = async (main) => {
 };
 
 const DiagTab = {};
+
+// Trunk / process / custom IP picker used by the SIP trace, RTP capture and packet capture forms
+function targetField() {
+  const tr = Diag.trunks || [], pr = Diag.procs || [];
+  return `<label class="tgt">Trunk / process<select name="target"><option value="">All traffic</option>
+      ${tr.length ? `<optgroup label="SIP trunks">${tr.map((t) => `<option value="trunk:${esc(t.name)}">trunk ${esc(t.name)} — ${esc(t.host)}</option>`).join('')}</optgroup>` : ''}
+      ${pr.length ? `<optgroup label="Processes">${pr.map((p) => `<option value="process:${esc(p.code)}">process ${esc(p.code)} — ${esc(p.name)}</option>`).join('')}</optgroup>` : ''}
+      <option value="ip">Custom IP…</option></select><small class="tgtIps mono"></small></label>
+    <label class="tgtHost hidden">IP / CIDR<input name="host" class="mono" placeholder="e.g. 203.0.113.5"></label>`;
+}
+// wire the picker in form f: show the custom IP box and the resolved IPs
+function targetWire(f) {
+  const sel = f.target, box = $('.tgtHost', f), out = $('.tgtIps', f);
+  const show = async () => {
+    box.classList.toggle('hidden', sel.value !== 'ip');
+    out.textContent = ''; out.classList.remove('bad');
+    if (!sel.value || (sel.value === 'ip' && !f.host.value.trim())) return;
+    try { const r = await api('GET', '/api/diag/target?' + new URLSearchParams({ target: sel.value, host: f.host.value.trim() })); out.textContent = r.hosts.join(', '); }
+    catch (e) { out.textContent = e.message; out.classList.add('bad'); }
+  };
+  sel.addEventListener('change', show); f.host.addEventListener('change', show);
+}
 
 // ---------------------------------------------------------------- issues
 DiagTab.issues = async (el) => {
@@ -884,7 +906,7 @@ DiagTab.issues = async (el) => {
 const STATE_CLS = { 'IN CALL': 'ok', COMPLETED: 'ok', RINGING: 'info', 'CALL SETUP': 'info', REJECTED: 'bad', CANCELLED: 'warn' };
 DiagTab.sip = async (el) => {
   el.innerHTML = `<div class="panel" style="margin-bottom:14px"><form class="filters" id="stf">
-      <label>Only IP<input name="host" class="mono" placeholder="carrier / customer IP"></label>
+      ${targetField()}
       <label>Run for<select name="minutes"><option value="5">5 min</option><option value="10" selected>10 min</option><option value="30">30 min</option><option value="60">60 min</option></select></label>
       <label class="check" style="max-width:none"><input type="checkbox" name="keepNoise"> include OPTIONS / REGISTER</label>
       <div class="actions"><button class="btn primary" id="stGo">Start trace</button><button type="button" class="btn" id="stStop">Stop</button><button type="button" class="btn" id="stClr">Clear</button></div>
@@ -893,10 +915,11 @@ DiagTab.sip = async (el) => {
       <label style="max-width:160px">Method<select id="stM"><option value="">All</option><option>INVITE</option><option>REGISTER</option><option>OPTIONS</option></select></label></div>
     <div class="tw" style="max-height:420px;overflow:auto"><table><thead><tr><th>Start</th><th>Method</th><th>From</th><th>To</th><th>Source</th><th>Destination</th><th class="r">Msgs</th><th>State</th><th>Codecs</th></tr></thead><tbody id="stBody"></tbody></table></div></div>
     <div id="stFlow"></div>`;
-  const f = $('#stf');
+  const f = $('#stf'); targetWire(f);
   const status = (st) => {
     const err = st.error ? `<span class="chip bad" style="white-space:normal">${esc(st.error)}</span>` : '';
     $('#stSum').innerHTML = (st.running ? `<span class="chip ok">● capturing</span><span class="chip">until ${clock(st.until)}</span>` : `<span class="chip">stopped</span>`) +
+      (st.label ? `<span class="chip info">${esc(st.label)}</span>` : '') +
       `<span class="chip mono">${esc(st.filter || 'no trace yet')}</span><span class="chip">${fmtInt(st.packets)} packets</span><span class="chip">${fmtInt(st.dialogs)} dialogs</span>${err}`;
     $('#stGo').textContent = st.running ? 'Restart trace' : 'Start trace';
   };
@@ -971,7 +994,7 @@ DiagTab.rtp = async (el) => {
       <div class="tw" style="max-height:420px;overflow:auto"><table><thead><tr><th>Channel</th><th>State</th><th>Caller → number</th><th class="r">Up</th><th class="r">RX pkts</th><th class="r">RX lost</th><th class="r">RX jitter</th><th class="r">TX pkts</th><th class="r">TX lost</th><th class="r">RTT</th><th>Problems</th></tr></thead><tbody id="rBody"></tbody></table></div></div>
     <div class="panel"><h2>Capture & analyse RTP streams <small style="text-transform:none;letter-spacing:0;font-weight:400">like tshark -z rtp,streams</small></h2>
       <form class="filters" id="rcf"><label>Seconds<select name="seconds"><option>5</option><option selected>10</option><option>20</option><option>30</option><option>60</option></select></label>
-        <label>Only IP<input name="host" class="mono" placeholder="carrier / customer IP"></label>
+        ${targetField()}
         <div class="actions"><button class="btn primary" id="rcGo">Capture</button></div></form>
       <div class="summary" id="rcSum"></div>
       <div class="tw"><table><thead><tr><th>Source</th><th>Destination</th><th>SSRC</th><th>Codec</th><th class="r">Packets</th><th class="r">Lost</th><th class="r">Seq err</th><th class="r">Max Δ</th><th class="r">Jitter</th><th class="r">Max jitter</th><th class="r">Dur.</th><th>Problems</th></tr></thead><tbody id="rcBody"><tr><td colspan="12" class="empty">Captures RTP on ports ${'…'} for the chosen time and reports loss, jitter and one-way audio per stream.</td></tr></tbody></table></div></div>`;
@@ -987,6 +1010,7 @@ DiagTab.rtp = async (el) => {
       : `<tr><td colspan="11" class="empty">No active SIP channels.</td></tr>`;
   };
   $('#rRef').onclick = () => live();
+  targetWire($('#rcf'));
   $('#rcf').addEventListener('submit', async (e) => {
     e.preventDefault();
     const d = formData(e.target); const btn = $('#rcGo'); btn.disabled = true;
@@ -1016,6 +1040,8 @@ DiagTab.pcap = async (el) => {
   const tool = (n, p) => `<span class="chip ${p ? 'ok' : ''}">${n} ${p ? esc(p) : 'not installed'}</span>`;
   const cmds = [
     ['Live SIP ladder in the terminal (sngrep)', `sngrep -d any port ${st.sipPort}`],
+    ...(Diag.trunks || []).map((t) => [`sngrep: only trunk ${t.name}`, `sngrep -d any host ${t.host} and port ${st.sipPort}`]),
+    ['sngrep: only calls with a number', `sngrep -d any -c 9876543210 port ${st.sipPort}`],
     ['SIP + RTP to a file (tcpdump)', `tcpdump -i any -nn -s0 -w /tmp/sip.pcap port ${st.sipPort} or udp portrange ${st.rtpRange.start}-${st.rtpRange.end}`],
     ['SIP messages as text (tcpdump)', `tcpdump -i any -nn -s0 -A port ${st.sipPort}`],
     ['RTP stream stats from a file (tshark)', 'tshark -r /tmp/sip.pcap -q -z rtp,streams'],
@@ -1024,10 +1050,14 @@ DiagTab.pcap = async (el) => {
     ['Asterisk: RTP per channel', 'asterisk -rx "pjsip show channelstats"'],
   ];
   el.innerHTML = `<div class="grid two">
-    <div class="panel"><h2>Download a capture (tcpdump)</h2><form class="body" id="pf" style="display:flex;flex-direction:column;gap:10px">
+    <div class="panel"><h2>Download a capture</h2><form class="body" id="pf" style="display:flex;flex-direction:column;gap:10px">
+      <div class="row" style="align-items:center"><span class="seg">
+        <label class="check"><input type="radio" name="tool" value="tcpdump" checked> tcpdump <small>every packet</small></label>
+        <label class="check"><input type="radio" name="tool" value="sngrep" ${st.tools.sngrep ? '' : 'disabled'}> sngrep <small>${st.tools.sngrep ? 'only SIP calls matching a number' : 'not installed'}</small></label></span></div>
+      <div class="row">${targetField()}</div>
       <div class="row"><label>Seconds<select name="seconds"><option>10</option><option selected>30</option><option>60</option><option>120</option><option>300</option></select></label>
-        <label>Only IP<input name="host" class="mono" placeholder="carrier / customer IP"></label>
-        <label>Extra port<input name="port" class="mono" placeholder="e.g. 5080" inputmode="numeric"></label></div>
+        <label class="sgOnly hidden">Match<input name="match" class="mono" placeholder="number, DID or Call-ID"></label>
+        <label class="tdOnly">Extra port<input name="port" class="mono" placeholder="e.g. 5080" inputmode="numeric"></label></div>
       <div class="row" style="align-items:center"><label class="check"><input type="checkbox" name="sip" checked> SIP (port ${st.sipPort}/5060/5061)</label>
         <label class="check"><input type="checkbox" name="rtp"> RTP (UDP ${st.rtpRange.start}-${st.rtpRange.end})</label></div>
       <p class="hint">The download runs for the chosen time, then finishes. Open it in Wireshark: <b>Telephony → VoIP Calls</b> shows the call flow and lets you play the audio (needs RTP).</p>
@@ -1036,12 +1066,23 @@ DiagTab.pcap = async (el) => {
       ${!st.tools.sngrep || !st.tools.tshark ? `<p class="hint">Optional for SSH use: <code>apt install sngrep tshark</code>. This page does not need them.</p>` : ''}
       <div class="cmds">${cmds.map(([t, c]) => `<div class="cmd"><div class="lab">${esc(t)}</div><div class="row" style="align-items:center"><code>${esc(c)}</code><button type="button" class="btn sm" data-copy="${esc(c)}">Copy</button></div></div>`).join('')}</div></div></div></div>`;
   $$('[data-copy]').forEach((b) => (b.onclick = () => copy(b.dataset.copy)));
-  $('#pf').addEventListener('submit', (e) => {
+  const pf = $('#pf'); targetWire(pf);
+  const toolSync = () => {
+    const sg = pf.tool.value === 'sngrep';
+    $$('.sgOnly', pf).forEach((x) => x.classList.toggle('hidden', !sg)); $$('.tdOnly', pf).forEach((x) => x.classList.toggle('hidden', sg));
+  };
+  $$('input[name=tool]', pf).forEach((r) => r.addEventListener('change', toolSync));
+  pf.addEventListener('submit', async (e) => {
     e.preventDefault();
     const f = e.target, d = formData(f);
-    const qs = new URLSearchParams({ seconds: d.seconds, host: d.host || '', port: d.port || '', sip: f.sip.checked ? '1' : '0', rtp: f.rtp.checked ? '1' : '0' });
+    if (!f.sip.checked && !f.rtp.checked && !(d.tool === 'tcpdump' && d.port)) return toast('Tick SIP and/or RTP', true);
+    // check the target first: a failed download would replace the page with an error
+    try { if (d.target) await api('GET', '/api/diag/target?' + new URLSearchParams({ target: d.target, host: d.host || '' })); }
+    catch (er) { return toast(er.message, true); }
+    const qs = new URLSearchParams({ tool: d.tool, seconds: d.seconds, target: d.target || '', host: d.host || '', port: d.tool === 'tcpdump' ? d.port || '' : '',
+      match: d.tool === 'sngrep' ? d.match || '' : '', sip: f.sip.checked ? '1' : '0', rtp: f.rtp.checked ? '1' : '0' });
     location.href = '/api/diag/pcap?' + qs;
-    toast(`Capturing for ${d.seconds}s — the file downloads when it finishes`);
+    toast(`${d.tool} capturing for ${d.seconds}s — the file downloads when it finishes`);
   });
 };
 

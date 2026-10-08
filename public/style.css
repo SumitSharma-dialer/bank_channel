@@ -286,3 +286,10 @@ tr.sel td { background: var(--accent-soft) !important; }
 .cmd + .cmd { padding-top: 2px; }
 td small, .mono small { color: var(--ink-3); font-family: var(--sans); }
 .panel > h2 .btn, .panel > h2 .check { text-transform: none; letter-spacing: 0; }
+.tgt { min-width: 240px; }
+.tgt select { font-size: 13.5px; }
+.tgtIps { color: var(--ink-3); font-size: 11.5px; min-height: 14px; }
+.tgtIps.bad { color: var(--bad); }
+.seg { display: flex; gap: 18px; flex-wrap: wrap; }
+.seg small { color: var(--ink-3); font-weight: 400; }
+.filters .tgt { max-width: 340px; flex: 2 1 240px; }
