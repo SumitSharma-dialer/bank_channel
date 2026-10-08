@@ -14,6 +14,7 @@ host `172.20.10.201` (public `182.95.69.226` via NAT), app in `/opt/sipdist`, As
 | [diagnostics.md](diagnostics.md) | Diagnostics page (issue tracker, SIP trace, RTP, tcpdump, log search) and custom dispositions (LIMIT_REACH, SIP_DOWN, SIP response per reject) |
 | [known-issues.md](known-issues.md) | Problems found while writing these docs (config mismatches, dead code, schema drift) |
 | [client/SIPDist-New-Features-Oct-2026.pdf](client/SIPDist-New-Features-Oct-2026.pdf) | Client handout: trunk CPS limit, resource history graphs, live Asterisk log in Diagnostics, log retention (October 2026) |
+| [client/Carrier-Trunk-Setup-Route2Shine.pdf](client/Carrier-Trunk-Setup-Route2Shine.pdf) | Carrier trunk setup for ROUTE 2 SHINE (pilot 8064258400): eno2 network + routes, UI steps, go-live checklist, troubleshooting |
 
 ## One-paragraph summary
 
