@@ -38,8 +38,9 @@ router.get('/calls', wrap(async (req, res) => {
   const f = callFilter(req.query);
   const size = int(req.query.size, { min: 10, max: 500, def: 50 });
   const page = int(req.query.page, { min: 1, max: 100000, def: 1 });
+  const dir = req.query.sort === 'asc' ? 'ASC' : 'DESC';   // by call time, newest first by default
   const [rows, count, disp] = await Promise.all([
-    q(`SELECT * FROM calls WHERE ${f.sql} ORDER BY start_time DESC LIMIT ${size} OFFSET ${(page - 1) * size}`, f.args),
+    q(`SELECT * FROM calls WHERE ${f.sql} ORDER BY start_time ${dir}, id ${dir} LIMIT ${size} OFFSET ${(page - 1) * size}`, f.args),
     q(`SELECT count(*)::int AS n, coalesce(sum(bill_sec),0)::bigint AS talk FROM calls WHERE ${f.sql}`, f.args),
     q(`SELECT disposition, count(*)::int AS n FROM calls WHERE ${f.sql} GROUP BY 1 ORDER BY 2 DESC`, f.args),
   ]);
