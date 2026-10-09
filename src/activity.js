@@ -1,9 +1,10 @@
 'use strict';
-// Activity log: every /api request of a signed-in user (who, when, IP, what, result), plus sign-in / sign-out and
-// failed sign-ins. Only super admins can read it (Activity page). Background refreshes the UI marks with X-Poll
+// Activity log: every /api request of a signed-in user (who, when, IP, what), plus sign-in / sign-out and failed
+// sign-ins. `detail` says what was viewed (filters, which trunk / process) or changed (object, old -> new values from
+// the audit entries the request wrote). Only super admins can read it (Activity page). Background refreshes the UI marks with X-Poll
 // (timers on the System / Processes / Diagnostics pages) are not logged, and the same GET of the same session is
 // logged at most once a minute, so the log shows what people did, not timer noise.
-const { q } = require('./db');
+const { q, requestCtx } = require('./db');
 const { clientIp } = require('./auth');
 
 const DEDUP_MS = 60 * 1000;
@@ -51,6 +52,7 @@ const NAMES = [
   ['DELETE', /^\/users\/sessions\/\d+$/, 'Signed out a session'],
   ['POST', /^\/users\/sessions\/end$/, 'Signed out sessions'],
   ['POST', /^\/me\/password$/, 'Changed own password'],
+  ['GET', /^\/reports\/dispositions$/, 'Opened the console'],
   ['GET', /^\/system\/(health|config-preview)$/, 'Opened system page'],
   ['GET', /^\/system\/resources\/history$/, 'Viewed resource history'],
   ['GET', /^\/system\/cli\//, 'Ran Asterisk CLI view'],
@@ -60,10 +62,67 @@ const NAMES = [
 const nameOf = (method, path) => (NAMES.find(([m, re]) => m === method && re.test(path)) || [])[2] || null;
 
 function write(r) {
-  q(`INSERT INTO activity_log(username, role, sid, ip, method, path, query, status, ms, action) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+  q(`INSERT INTO activity_log(username, role, sid, ip, method, path, query, status, ms, action, detail) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
     [r.username || null, r.role || null, r.sid || null, r.ip || null, r.method, String(r.path).slice(0, 200), r.query || null,
-      r.status || null, r.ms == null ? null : r.ms, r.action ? String(r.action).slice(0, 64) : null])
+      r.status || null, r.ms == null ? null : r.ms, r.action ? String(r.action).slice(0, 64) : null, r.detail ? String(r.detail).slice(0, 2000) : null])
     .catch((e) => console.error('[activity]', e.message));
+}
+
+// ---- readable detail
+const short = (v) => {
+  const t = v == null || v === '' ? '—' : Array.isArray(v) ? v.join(', ') || '—' : typeof v === 'object' ? JSON.stringify(v) : String(v);
+  return t.length > 80 ? t.slice(0, 77) + '…' : t;
+};
+const field = (k) => k.replace(/_/g, ' ');
+
+// what was viewed: the filters of a GET, in words
+const QUERY_WORDS = {
+  process: 'process', trunk: 'trunk', disposition: 'disposition', did: 'DID', user: 'user', scope: 'by', metric: 'metric',
+  step: 'step', target: 'target', host: 'host', method: 'method', tool: 'tool', what: '', levels: 'levels', lines: 'lines',
+};
+function viewDetail(query) {
+  const p = new URLSearchParams(query || '');
+  const out = [];
+  const from = p.get('from'), to = p.get('to');
+  if (from || to) out.push(from && to && from !== to ? `${from} → ${to}` : from || to);
+  for (const [k, v] of p) {
+    if (!v || ['from', 'to', 'size', 'sort', 'page', 'writes', 'failed', 'id'].includes(k)) continue;
+    if (k === 'direction') out.push(v === 'in' ? 'inbound' : 'outbound');
+    else if (k === 'number') out.push(`number contains ${v}`);
+    else if (k === 'q') out.push(`search "${v}"`);
+    else if (k === 'hours') out.push(`last ${v} h`);
+    else if (k === 'all') out.push('incl. ended');
+    else if (k in QUERY_WORDS) out.push(`${QUERY_WORDS[k]} ${v}`.trim());
+    else out.push(`${k} ${v}`);
+  }
+  if (p.get('sort') === 'asc') out.push('oldest first');
+  if (+p.get('page') > 1) out.push(`page ${p.get('page')}`);
+  return out.join(' · ');
+}
+
+// what was changed: one audit entry in words, e.g. "trunk airtel: max channels 30 → 60"
+const ENTITY = { admin: 'user', cause_rules: 'cause rules', diag: '' };
+function changeDetail({ entity, entityId, details }) {
+  const d = details || {};
+  const who = d.name || d.code || d.username || (entityId != null ? `#${entityId}` : '');
+  const head = [ENTITY[entity] ?? entity, who].filter(Boolean).join(' ');
+  const parts = [];
+  for (const [k, v] of Object.entries(d.changes || {})) parts.push(`${field(k)} ${short(v[0])} → ${short(v[1])}`);
+  for (const [k, v] of Object.entries(d)) {
+    if (['name', 'code', 'username', 'changes', 'ip'].includes(k) || v == null || v === '' || (k === 'sessionsEnded' && !v)) continue;
+    parts.push(`${field(k)} ${short(v)}`);
+  }
+  if (d.changes && !Object.keys(d.changes).length && !parts.length) parts.push('saved without changes');
+  return head + (parts.length ? `: ${parts.join(', ')}` : '');
+}
+
+// trunk / process named in the path (/trunks/4, /processes/7/header-log)
+async function pathObject(path) {
+  const m = /^\/(trunks|processes)\/(\d+)/.exec(path);
+  if (!m) return '';
+  const col = m[1] === 'trunks' ? 'name' : 'code';
+  const r = (await q(`SELECT ${col} AS n FROM ${m[1]} WHERE id=$1`, [+m[2]]).catch(() => ({ rows: [] }))).rows[0];
+  return `${m[1] === 'trunks' ? 'trunk' : 'process'} ${r ? r.n : '#' + m[2]}`;
 }
 
 // query string without secrets (passwords never travel in the query, but be safe)
@@ -86,13 +145,29 @@ function middleware(req, res, next) {
     if (seen.size > 20000) for (const [k, t] of seen) if (now - t > DEDUP_MS) seen.delete(k);
   }
   const t0 = Date.now(), path = req.path.replace(/\/+$/, '') || '/';
-  res.on('finish', () => write({ username: a.user, role: a.role, sid: a.sid, ip: clientIp(req), method: req.method,
-    path: '/api' + path, query: cleanQuery(req.url), status: res.statusCode, ms: Date.now() - t0, action: nameOf(req.method, path) }));
-  next();
+  const ctx = { audits: [], error: null };
+  const json = res.json.bind(res);
+  res.json = (b) => { if (b && b.error) ctx.error = b.error; return json(b); };
+  // a trunk / process deleted by this request has no name afterwards: look it up first
+  const named = req.method === 'GET' ? null : pathObject(path);
+  res.on('finish', async () => {
+    const query = cleanQuery(req.url), status = res.statusCode;
+    let detail;
+    if (status >= 400) detail = `${status === 403 ? 'refused' : 'failed'}${ctx.error ? ': ' + ctx.error : ''}`;
+    else if (ctx.audits.length) detail = ctx.audits.map(changeDetail).join('; ');
+    else {
+      const obj = await (named || pathObject(path));
+      const cli = /^\/system\/cli\/(\w+)/.exec(path);
+      detail = [obj, cli && cli[1], viewDetail(query)].filter(Boolean).join(' · ');
+    }
+    write({ username: a.user, role: a.role, sid: a.sid, ip: clientIp(req), method: req.method, path: '/api' + path, query,
+      status, ms: Date.now() - t0, action: nameOf(req.method, path), detail });
+  });
+  requestCtx.run(ctx, next);
 }
 
 // sign-in / sign-out (outside requireAuth) and live feed connects (raw http request: no req.path)
-const event = (req, { user, role, sid, status, action }) =>
-  write({ username: user, role, sid, ip: clientIp(req), method: req.method, path: req.path || req.url.split('?')[0], status, action });
+const event = (req, { user, role, sid, status, action, detail }) =>
+  write({ username: user, role, sid, ip: clientIp(req), method: req.method, path: req.path || req.url.split('?')[0], status, action, detail });
 
-module.exports = { middleware, event, nameOf, cleanQuery };
+module.exports = { middleware, event, nameOf, cleanQuery, viewDetail, changeDetail };

@@ -22,3 +22,12 @@ test('activity: readable action names and query without secrets', () => {
   assert.strictEqual(activity.cleanQuery('/reports/calls?from=2026-10-01&token=abc'), 'from=2026-10-01&token=***');
   assert.strictEqual(activity.cleanQuery('/live'), null);
 });
+
+test('activity detail: filters viewed and fields changed, in words', () => {
+  assert.strictEqual(activity.viewDetail('from=2026-10-01&to=2026-10-09&process=tp&disposition=&number=98&page=2&size=50'),
+    '2026-10-01 → 2026-10-09 · process tp · number contains 98 · page 2');
+  assert.strictEqual(activity.viewDetail('from=2026-10-09&to=2026-10-09'), '2026-10-09');
+  assert.strictEqual(activity.changeDetail({ entity: 'trunk', entityId: 3, details: { name: 'airtel', changes: { max_channels: [30, 60], password: ['***', '*** (changed)'] } } }),
+    'trunk airtel: max channels 30 → 60, password *** → *** (changed)');
+  assert.strictEqual(activity.changeDetail({ entity: 'process', entityId: 7, details: { code: 'tp' } }), 'process tp');
+});

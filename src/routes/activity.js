@@ -5,6 +5,7 @@ const router = require('express').Router();
 const { q } = require('../db');
 const tracker = require('../tracker');
 const { wrap, str, int } = require('./util');
+const { changeDetail } = require('../activity');
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const tz = () => require('../config').statsTz.replace(/[^A-Za-z0-9_/+\-]/g, '');
@@ -27,7 +28,7 @@ const paging = (qs) => {
 };
 
 router.get('/', wrap(async (req, res) => {
-  const f = filter(req.query, { user: 'username', text: ['action', 'path', 'query', 'ip', 'username'] });
+  const f = filter(req.query, { user: 'username', text: ['action', 'detail', 'path', 'query', 'ip', 'username'] });
   if (req.query.writes === '1') f.sql += ` AND method <> 'GET'`;
   if (req.query.failed === '1') f.sql += ' AND status >= 400';
   const p = paging(req.query);
@@ -47,7 +48,7 @@ router.get('/changes', wrap(async (req, res) => {
     q(`SELECT * FROM audit_log WHERE ${f.sql} ORDER BY at DESC, id DESC ${p.sql}`, f.args),
     q(`SELECT count(*)::int AS n FROM audit_log WHERE ${f.sql}`, f.args),
   ]);
-  res.json({ rows: rows.rows.map((r) => ({ ...r, id: +r.id })), total: count.rows[0].n, page: p.page, size: p.size, from: f.from, to: f.to });
+  res.json({ rows: rows.rows.map((r) => ({ ...r, id: +r.id, detail: changeDetail({ entity: r.entity, entityId: r.entity_id, details: r.details }) })), total: count.rows[0].n, page: p.page, size: p.size, from: f.from, to: f.to });
 }));
 
 module.exports = router;

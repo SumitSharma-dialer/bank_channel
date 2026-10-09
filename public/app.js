@@ -121,7 +121,7 @@ function connectWs() {
     if (type === 'call') { S.feed.unshift(data); S.feed.length = Math.min(S.feed.length, 60); if (S.page === 'live') Live.feed(data); }
   };
   ws.onclose = (ev) => { S.ws = null; setConn(null);
-    if (ev.code === 4401) { toast('Your session was ended — sign in again', true); showLogin(); return; } setTimeout(() => { if (!$('#app').classList.contains('hidden')) connectWs(); }, 2000); };
+    if (ev.code === 4401) { toast(ev.reason === 'signed in elsewhere' ? 'Your account was signed in on another browser or device — this session was signed out' : 'Your session was ended — sign in again', true); showLogin(); return; } setTimeout(() => { if (!$('#app').classList.contains('hidden')) connectWs(); }, 2000); };
 }
 function issueBadge(i) {
   const b = $('#navIssues'); if (!i) return;
@@ -1827,7 +1827,6 @@ PAGES.users = async (main) => {
 
 // =================================================================== ACTIVITY (super admins)
 // Requests: every action of every user (activity_log). Changes: what was saved, with the values (audit_log).
-const ACT_STATUS = (n) => (n >= 500 ? 'bad' : n >= 400 ? 'warn' : 'ok');
 PAGES.activity = async (main) => {
   main.innerHTML = `<div class="head"><div><h1>Activity log</h1><p>What every user did: pages opened, searches, exports, changes, sign-ins and failed sign-ins. Only super admins see this page. Times in ${esc(S.tz)}. Old entries are removed by the retention job.</p></div></div>
     <div class="tabs big" id="aTabs"><button data-t="req" class="on">Activity</button><button data-t="chg">Changes (saved values)</button></div>
@@ -1837,7 +1836,7 @@ PAGES.activity = async (main) => {
       <label>User<select name="user"><option value="">All users</option></select></label>
       <label>Search<input name="q" placeholder="action, page, IP…"></label>
       <label class="check reqOnly" style="align-self:center"><input type="checkbox" name="writes" value="1"> changes only</label>
-      <label class="check reqOnly" style="align-self:center"><input type="checkbox" name="failed" value="1"> errors / denied only</label>
+      <label class="check reqOnly" style="align-self:center"><input type="checkbox" name="failed" value="1"> refused / failed only</label>
       <div class="actions"><button class="btn primary">Search</button></div>
     </form><div class="summary" id="aSum"></div>
     <div class="tw"><table><thead id="aHead"></thead><tbody id="aBody"></tbody></table></div>
@@ -1849,10 +1848,10 @@ PAGES.activity = async (main) => {
   const load = async () => {
     $$('#aTabs button').forEach((b) => b.classList.toggle('on', b.dataset.t === tab));
     $$('.reqOnly', f).forEach((x) => x.classList.toggle('hidden', tab !== 'req'));
-    const cols = tab === 'req' ? 7 : 5;
+    const cols = tab === 'req' ? 5 : 4;
     $('#aHead').innerHTML = tab === 'req'
-      ? '<tr><th>When</th><th>User</th><th>Action</th><th>Request</th><th>Result</th><th class="r">Time</th><th>IP</th></tr>'
-      : '<tr><th>When</th><th>User</th><th>Change</th><th>Object</th><th>Values</th></tr>';
+      ? '<tr><th>When</th><th>User</th><th>Action</th><th>What was viewed / changed</th><th>IP</th></tr>'
+      : '<tr><th>When</th><th>User</th><th>Change</th><th>What was changed</th></tr>';
     $('#aBody').innerHTML = `<tr><td colspan="${cols}" class="empty">Loading…</td></tr>`;
     try {
       const r = await api('GET', `/api/activity${tab === 'chg' ? '/changes' : ''}?` + qs());
@@ -1864,14 +1863,11 @@ PAGES.activity = async (main) => {
       $('#aBody').innerHTML = !r.rows.length ? `<tr><td colspan="${cols}" class="empty">Nothing for this filter.</td></tr>`
         : tab === 'req' ? r.rows.map((x) => `<tr>${when(x)}
             <td class="t-name"><b>${esc(x.username || '?')}</b><small>${esc(ROLE_NAME[x.role] || x.role || '')}</small></td>
-            ${td(esc(x.action || '—'))}
-            <td class="mono" style="font-size:12px;max-width:420px;overflow-wrap:anywhere"><b>${esc(x.method)}</b> ${esc(x.path)}${x.query ? `<span style="color:var(--ink-3)">?${esc(x.query)}</span>` : ''}</td>
-            <td>${x.status ? `<span class="chip ${ACT_STATUS(x.status)}">${x.status}</span>` : ''}</td>
-            <td class="r num" style="font-size:12px">${x.ms != null ? x.ms + ' ms' : ''}</td>
+            ${td(esc(x.action || `${x.method} ${x.path}`))}
+            <td style="font-size:12.5px;max-width:560px;overflow-wrap:anywhere${x.status >= 400 ? ';color:var(--bad)' : ''}">${esc(x.detail || '')}</td>
             <td class="mono" style="font-size:12px">${esc(x.ip || '')}</td></tr>`).join('')
         : r.rows.map((x) => `<tr>${when(x)}${td(`<b>${esc(x.admin || '?')}</b>`)}${td(esc(x.action))}
-            <td class="mono" style="font-size:12px">${esc(x.entity || '')}${x.entity_id ? ' #' + esc(x.entity_id) : ''}</td>
-            <td class="mono" style="font-size:12px;max-width:520px;overflow-wrap:anywhere">${x.details ? esc(Object.entries(x.details).map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`).join('  ')) : ''}</td></tr>`).join('');
+            <td style="font-size:12.5px;max-width:620px;overflow-wrap:anywhere">${esc(x.detail || '')}</td></tr>`).join('');
       const pages = Math.max(1, Math.ceil(r.total / r.size));
       $('#aPager').innerHTML = `Page ${page} of ${pages} <button class="btn sm" id="apv" ${page <= 1 ? 'disabled' : ''}>‹ Prev</button><button class="btn sm" id="anx" ${page >= pages ? 'disabled' : ''}>Next ›</button>`;
       $('#apv').onclick = () => { page--; load(); }; $('#anx').onclick = () => { page++; load(); };

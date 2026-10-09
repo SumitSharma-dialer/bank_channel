@@ -6,7 +6,7 @@ const { q, pool, audit } = require('../db');
 const { apply } = require('../asterisk/apply');
 const { peerConfig } = require('../asterisk/render');
 const tracker = require('../tracker');
-const { Bad, wrap, str, int, bool, name, IP_RE, codecs, safeText, genPassword, suggestCli } = require('./util');
+const { Bad, wrap, str, int, bool, name, diff, IP_RE, codecs, safeText, genPassword, suggestCli } = require('./util');
 
 const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 const HHMM = /^([01][0-9]|2[0-3]):[0-5][0-9]$/;
@@ -258,7 +258,7 @@ router.put('/:id', wrap(async (req, res) => {
   const p = await parse({ codecs: cur.codecs, notes: cur.notes, sip_port: cur.sip_port, ...req.body, sip_password: req.body.sip_password || cur.sip_password }, id);
   const dids = parseDids(req.body.dids, p);
   await saveProcess(id, p, dids);
-  res.json({ apply: await changed(req, 'update', id, { code: p.code, limit: p.channel_limit, was: cur.channel_limit, ...(dids ? { dids: dids.map((d) => didAt(d.len, d.lo, d.hi)) } : {}) }) });
+  res.json({ apply: await changed(req, 'update', id, { code: p.code, changes: diff(cur, p), ...(dids ? { dids: dids.map((d) => didAt(d.len, d.lo, d.hi)) } : {}) }) });
 }));
 
 router.post('/:id/limit', wrap(async (req, res) => {

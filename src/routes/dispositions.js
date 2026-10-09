@@ -7,7 +7,7 @@ const { CAUSE_STATUSES, CAUSE_TARGETS } = require('../disposition');
 const tracker = require('../tracker');
 const { apply } = require('../asterisk/apply');
 const { SIP_CAUSE } = require('../asterisk/render');
-const { Bad, wrap, str, int } = require('./util');
+const { Bad, wrap, str, int, diff } = require('./util');
 
 const CODE_RE = /^[A-Z][A-Z0-9_]{1,15}$/;
 
@@ -67,7 +67,7 @@ router.put('/:code', wrap(async (req, res) => {
     if (!SIP_CAUSE[sip]) throw new Bad(`SIP response must be one of ${Object.keys(SIP_CAUSE).join(', ')}`);
   }
   await q('UPDATE dispositions SET custom_code=$2, label=$3, sip_code=$4 WHERE code=$1', [cur.code, custom === cur.code ? '' : custom, label, sip]);
-  await audit(req.user, 'disposition', 'disposition', cur.code, { custom_code: custom, label, sip_code: sip });
+  await audit(req.user, 'disposition', 'disposition', cur.code, { changes: diff({ custom_code: cur.custom_code || cur.code, label: cur.label, sip_code: cur.sip_code }, { custom_code: custom, label, sip_code: sip }) });
   // the SIP response is in the dialplan: re-render and reload
   const result = sip !== cur.sip_code ? await apply(`disposition ${cur.code} -> ${sip}`) : null;
   res.json({ ok: true, apply: result });

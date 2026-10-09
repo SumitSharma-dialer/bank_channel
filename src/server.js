@@ -41,9 +41,12 @@ app.post('/api/login', wrap(async (req, res) => {
   }
   attempts.delete(ip);
   const sid = await auth.startSession(req, res, u);
-  activity.event(req, { user: u, role: row.role, sid, status: 200, action: 'Signed in' });
+  // admins and super admins: one session at a time — signing in ends the earlier one (its live feed closes at once)
+  const ended = row.role === 'viewer' ? [] : await auth.revoke({ user: u, except: sid, by: 'new sign-in', reason: 'signed in elsewhere' });
+  activity.event(req, { user: u, role: row.role, sid, status: 200, action: 'Signed in',
+    detail: ended.length ? `earlier session${ended.length > 1 ? 's' : ''} signed out (${ended.length})` : '' });
   await q('UPDATE admins SET last_login=now() WHERE id=$1', [row.id]);
-  await audit(u, 'login', 'admin', row.id, { ip: auth.clientIp(req) });
+  await audit(u, 'login', 'admin', row.id, { ip: auth.clientIp(req), ...(ended.length ? { earlierSessionsEnded: ended.length } : {}) });
   res.json({ user: u });
 }));
 app.post('/api/logout', wrap(async (req, res) => {
@@ -122,7 +125,7 @@ tracker.bus.on('snapshot', (s) => {
 tracker.bus.on('hit', (h) => broadcast('hit', (a) => (scope.seesProcess(a, h.process) ? h : null)));
 tracker.bus.on('call', (c) => broadcast('call', (a) => (scope.seesProcess(a, c.process) ? (scope.isViewer(a) ? { ...c, trunk: undefined } : c) : null)));
 // signed out / revoked on the Users page: drop its live feed at once
-auth.bus.on('revoked', (ids) => { for (const c of wss.clients) if (c.auth && ids.includes(c.auth.sid)) c.close(4401, 'session ended'); });
+auth.bus.on('revoked', (ids, reason) => { for (const c of wss.clients) if (c.auth && ids.includes(c.auth.sid)) c.close(4401, reason || 'session ended'); });
 
 (async () => {
   await auth.ensureAdmin();

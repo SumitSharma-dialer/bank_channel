@@ -28,6 +28,16 @@ function codecs(v) {
 }
 const safeText = (v, max) => str(v, max).replace(/[\r\n;#\[\]]/g, ' ');
 
+// changed fields of an edit, for the audit log: { field: [old, new] }; secrets only say that they changed
+function diff(cur, next) {
+  const out = {};
+  const norm = (v) => (v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v));
+  for (const k of Object.keys(next)) {
+    if (!(k in cur) || norm(cur[k]) === norm(next[k])) continue;
+    out[k] = /pass|secret/i.test(k) ? ['***', '*** (changed)'] : [cur[k], next[k]];
+  }
+  return out;
+}
 const genPassword = (n = 16) => crypto.randomBytes(n).toString('base64url').replace(/[-_]/g, '').slice(0, n);
 function suggestCli() {
   // Plausible 10-digit Indian mobile-format number (6-9 start)
@@ -37,4 +47,4 @@ function suggestCli() {
   return s;
 }
 
-module.exports = { Bad, wrap, str, int, bool, name, HOST_RE, IP_RE, codecs, safeText, genPassword, suggestCli };
+module.exports = { Bad, wrap, str, int, bool, name, diff, HOST_RE, IP_RE, codecs, safeText, genPassword, suggestCli };

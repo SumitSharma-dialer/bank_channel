@@ -41,6 +41,10 @@ A revoked session stops working on the next request, and its live WebSocket is c
 the UI goes back to the sign-in page). Sessions also end when:
 
 - the user signs out (`revoked_by` = the user),
+- **admins and super admins only:** the same account signs in again anywhere. One session per admin account: the new
+  sign-in ends the earlier session (`revoked_by` = `new sign-in`), its live feed closes and that browser shows
+  "Your account was signed in on another browser or device". The activity log notes it on the new **Signed in** row.
+  Monitor users may stay signed in on several devices,
 - an admin disables the user, changes their role or deletes them,
 - a new password is set (by an admin: all sessions; by the user from **Password** in the sidebar: their other sessions).
 
@@ -57,8 +61,11 @@ is a super admin; when the role was introduced, the existing admins became super
 Sidebar → **Activity log**. Two tabs, both filtered by day range, user and free text:
 
 - **Activity**: every `/api` request of every user (`activity_log`, written by `src/activity.js`): when, user and role,
-  a readable action (`Opened live dashboard`, `Searched CDR report`, `Exported CDR CSV`, `Edited trunk`, …), method,
-  path and query, result (HTTP status: refused requests show `403`), duration and IP. Sign-in, sign-out, live feed connects (WebSocket `/ws`), failed
+  a readable action (`Opened live dashboard`, `Searched CDR report`, `Exported CDR CSV`, `Edited trunk`, …), **what was
+  viewed or changed** and IP. Viewed: the filters in words and the trunk / process opened
+  (`2026-10-08 → 2026-10-09 · process beetel · number contains 98`). Changed: the object and each changed field
+  (`trunk airtel: max channels 30 → 60`; passwords only show that they changed). Refused or failed requests show
+  `refused: <reason>` / `failed: <reason>`. Sign-in, sign-out, live feed connects (WebSocket `/ws`), failed
   sign-ins (wrong password / unknown user / disabled user) and blocked sign-ins (too many attempts) are logged too.
   Filters **changes only** (non-GET) and **errors / denied only** (status ≥ 400).
   Not logged: timer refreshes the UI marks with `X-Poll: 1` (System resources, Processes connection status,

@@ -385,8 +385,10 @@ CREATE TABLE IF NOT EXISTS activity_log (
   query     TEXT,
   status    SMALLINT,
   ms        INTEGER,
-  action    VARCHAR(64)                  -- readable name, e.g. 'Opened CDR report', 'Edited trunk'
+  action    VARCHAR(64),                 -- readable name, e.g. 'Searched CDR report', 'Edited trunk'
+  detail    TEXT                         -- what was viewed (filters, object) or changed (object, old -> new)
 );
+ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS detail TEXT;
 CREATE INDEX IF NOT EXISTS activity_at ON activity_log(at DESC);
 CREATE INDEX IF NOT EXISTS activity_user ON activity_log(username, at DESC);
 

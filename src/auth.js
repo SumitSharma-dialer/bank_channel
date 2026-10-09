@@ -96,7 +96,7 @@ async function endSession(req, res) {
 // Revoke sessions by id or by user (except one session, e.g. the admin's own; skipRole: leave users of that role
 // alone). Emits the ids so live WebSockets close.
 const bus = new (require('events'))();
-async function revoke({ ids, user, except, skipRole, by }) {
+async function revoke({ ids, user, except, skipRole, by, reason }) {
   const args = [by || null], where = ['revoked_at IS NULL', 'expires_at > now()'];
   if (ids) { args.push(ids); where.push(`id = ANY($${args.length}::bigint[])`); }
   if (user) { args.push(user); where.push(`username = $${args.length}`); }
@@ -105,7 +105,7 @@ async function revoke({ ids, user, except, skipRole, by }) {
   const r = await q(`UPDATE sessions SET revoked_at=now(), revoked_by=$1 WHERE ${where.join(' AND ')} RETURNING id`, args);
   forget();
   const out = r.rows.map((x) => +x.id);
-  if (out.length) bus.emit('revoked', out);
+  if (out.length) bus.emit('revoked', out, reason);
   return out;
 }
 

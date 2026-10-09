@@ -3,7 +3,7 @@ const router = require('express').Router();
 const { q, pool, audit } = require('../db');
 const { apply } = require('../asterisk/apply');
 const tracker = require('../tracker');
-const { Bad, wrap, str, int, bool, name, HOST_RE, codecs, safeText } = require('./util');
+const { Bad, wrap, str, int, bool, name, diff, HOST_RE, codecs, safeText } = require('./util');
 
 const PUBLIC_COLS = `t.id,t.name,t.description,t.host,t.port,t.transport,t.username,
   (t.password IS NOT NULL AND t.password<>'') AS has_password,t.register,t.from_user,t.from_domain,
@@ -138,7 +138,7 @@ router.put('/:id', wrap(async (req, res) => {
   const t = parse(req.body, cur);
   const ranges = await parseRanges(req.body.did_ranges, id);
   await saveTrunk(id, t, ranges);
-  res.json({ apply: await changed(req, 'update', id, { name: t.name, ...(ranges ? { did_ranges: ranges.length } : {}) }) });
+  res.json({ apply: await changed(req, 'update', id, { name: t.name, changes: diff(cur, t), ...(ranges ? { did_ranges: ranges.length } : {}) }) });
 }));
 
 router.post('/:id/active', wrap(async (req, res) => {

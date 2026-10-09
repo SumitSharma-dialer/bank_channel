@@ -5,7 +5,7 @@
 const router = require('express').Router();
 const { q, audit } = require('../db');
 const auth = require('../auth');
-const { Bad, wrap, str, bool } = require('./util');
+const { Bad, wrap, str, bool, diff } = require('./util');
 
 const USER_RE = /^[a-zA-Z0-9._-]{3,64}$/;
 const pub = (r) => ({ id: r.id, username: r.username, full_name: r.full_name || '', role: r.role, processes: r.processes || [], tabs: r.tabs || [],
@@ -80,12 +80,13 @@ router.put('/:id', wrap(async (req, res) => {
   const active = req.body.active === undefined ? u.active : bool(req.body.active);
   if (u.username === req.user && (!active || b.role !== u.role)) throw new Bad('you cannot disable yourself or change your own role');
   if (u.role === 'superadmin' && u.active && (b.role !== 'superadmin' || !active)) await keepASuper(u.id);
+  const changes = diff(u, { ...b, active });
   const { rows } = await q(`UPDATE admins SET full_name=$2, role=$3, processes=$4, tabs=$5, active=$6 WHERE id=$1 RETURNING *`,
     [u.id, b.full_name, b.role, b.processes, b.tabs, active]);
   auth.forget();   // new rights apply on the next request
   let ended = [];
   if (!active || u.role !== b.role) ended = await auth.revoke({ user: u.username, by: req.user });   // disabled / role changed: sign out
-  await audit(req.user, 'user_update', 'admin', u.id, { username: u.username, role: b.role, processes: b.processes, tabs: b.tabs, active, sessionsEnded: ended.length });
+  await audit(req.user, 'user_update', 'admin', u.id, { username: u.username, changes, sessionsEnded: ended.length });
   res.json(pub(rows[0]));
 }));
 

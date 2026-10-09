@@ -162,7 +162,8 @@ Shown on the Activity page → **Changes** tab (super admins only).
 
 ### `activity_log` — what every user did (`src/activity.js`)
 `id, at, username, role, sid (session), ip, method, path, query, status, ms, action` (readable name, e.g.
-`Exported CDR CSV`). One row per `/api` request of a signed-in user, plus sign-in, sign-out and failed / blocked
+`Exported CDR CSV`), `detail` (what was viewed: filters / object; or changed: object and `field old → new` from the
+audit entries the request wrote). One row per `/api` request of a signed-in user, plus sign-in, sign-out and failed / blocked
 sign-ins. Timer refreshes sent with `X-Poll: 1` are skipped, and the same GET of one session is written at most once a
 minute. Indexes `activity_at (at DESC)`, `activity_user (username, at DESC)`. Super admins only (Activity page).
 
