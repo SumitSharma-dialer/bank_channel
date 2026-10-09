@@ -738,7 +738,7 @@ PAGES.cdr = async (main) => {
       <label>DID<input name="did" placeholder="exact DID" class="mono"></label>
       <div class="actions"><button class="btn primary">Search</button><button type="button" class="btn" id="csv">Export CSV</button></div>
     </form><div class="summary" id="cSum"></div>
-    <div class="tw"><table><thead><tr><th>Start</th><th>Process</th><th>Trunk</th><th>Number</th><th>Sent as</th><th>Caller ID</th><th>DID</th><th>Disposition</th><th class="r">Ring</th><th class="r">Talk</th><th class="r">Cause</th></tr></thead><tbody id="cBody"></tbody></table></div>
+    <div class="tw"><table><thead><tr><th>Start</th><th>Process</th><th>Trunk</th><th>Dummy link number</th><th>Sent as</th><th>Caller ID</th><th>DID</th><th>Disposition</th><th class="r">Ring</th><th class="r">Talk</th><th class="r">Cause</th></tr></thead><tbody id="cBody"></tbody></table></div>
     <div class="pager" id="cPager"></div></div>`;
   const f = $('#cf'); let page = 1;
   const qs = () => new URLSearchParams({ ...formData(f), page }).toString();
