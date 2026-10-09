@@ -10,9 +10,9 @@
 | PostgreSQL app user (`DB_USER` / `DB_PASS`, live: user `sipdist`, db `sipdist`) | `/opt/sipdist/.env` | `src/config.js` → `src/db.js` | PostgreSQL role password (`ALTER ROLE`) | `sudo -u postgres psql -c "ALTER ROLE sipdist PASSWORD '…'"`, update `.env`, `systemctl restart sipdist` |
 | Redis password (`REDIS_PASS`) | `/opt/sipdist/.env` | `src/config.js` → `src/redis.js` (builds `redis://:<pass>@host:port/0`; `REDIS_URL` overrides) | `requirepass` in `/etc/redis/sipdist.conf` (included from `/etc/redis/redis.conf` line ~2349) | change both, `systemctl restart redis-server sipdist` |
 | ARI user (`ARI_USER` / `ARI_PASS`, live user `sipdist`) | `/opt/sipdist/.env` | `src/config.js` → `src/ari.js` (HTTP Basic auth) | `/etc/asterisk/ari.conf` section `[sipdist]`, `password=` (plain) | edit both, `asterisk -rx 'module reload res_ari.so'`, restart sipdist |
-| Web UI admin password | table `admins.pass_hash` (scrypt hash) | `src/auth.js` | — | UI → System → change password (`POST /api/system/password`) |
+| Web UI user passwords | table `admins.pass_hash` (scrypt hash) | `src/auth.js` | — | own: sidebar → Password (`POST /api/me/password`); others: Users page → Password (see [users.md](users.md)) |
 | Initial admin password | env `ADMIN_PASSWORD` (only on **first** start when `admins` is empty; otherwise random and printed once to the journal) | `auth.ensureAdmin()` | — | only relevant for a fresh DB |
-| Session cookie signing key | env `SESSION_SECRET` | `src/auth.js` (HMAC-SHA256 of `sd_session`) | — | add to `.env`, restart (logs everyone out). **Missing on live — see [known-issues.md](known-issues.md)** |
+| Login sessions | table `sessions` (sha256 of the random `sd_session` token) | `src/auth.js` | — | Users page → Sessions → Sign out. No signing key is needed (`SESSION_SECRET` is no longer used) |
 | Carrier trunk SIP login | `trunks.username` / `trunks.password` (plain text in DB) | `renderTrunks()` | carrier account | UI → Trunks (blank password on edit = keep) |
 | ↳ written to | `/etc/asterisk/sipdist/trunks.conf` `[t_<name>-auth]` (mode 0640) | Asterisk | | regenerated automatically |
 | Customer authentication | `processes.auth_type`: `ip` → `processes.allowed_ips`; `password` → `sip_username` / `sip_password` | `renderProcesses()` → `[p_<code>-identify] match=` (ip) or `[p_<code>-auth]` (password) | customer server public IP, or the customer's `outbound_auth` | UI → Processes → Authentication (see [processes.md](processes.md)) |
@@ -36,7 +36,6 @@ Loaded by Node with `--env-file=/opt/sipdist/.env` (see `deploy/sipdist.service`
 |---|---|---|---|
 | `HTTP_HOST` | `0.0.0.0` | UI/API bind address | no (live uses `HOST`, which is ignored — default applies) |
 | `HTTP_PORT` | `3000` | UI/API port; also used in the dialplan CURL URL | no (live uses `PORT`, ignored — default applies) |
-| `SESSION_SECRET` | `dev-secret-change-me` | cookie signing | **no** (live has `JWT_SECRET`, which is ignored) |
 | `ADMIN_PASSWORD` | random | first admin only | no (live has `ADMIN_PASS`, ignored) |
 | `PUBLIC_IP` | `127.0.0.1` | shown in UI + customer peer config (the address customers send SIP / register to), alert links | yes (`182.95.69.226`, the public NAT address — was the private `172.20.10.201` until 2026-10-08, which internet customers cannot reach) |
 | `SIP_PORT` | `5060` | customer peer config | no (default) |
@@ -47,7 +46,7 @@ Loaded by Node with `--env-file=/opt/sipdist/.env` (see `deploy/sipdist.service`
 | `ASTERISK_RELOAD` | on (`0` = write files only) | ARI module reload after write | no |
 | `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASS` | `127.0.0.1` / `5432` / `channel_bank` / `channel_bank` / empty | PostgreSQL | yes |
 | `REDIS_URL` or `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASS` | `127.0.0.1:6379` db 0 | Redis | yes (host/port/pass) |
-| `RETENTION_DAYS` | `5` | DB history kept: older `calls`, `cdr`, `audit_log`, closed `diag_issues`, `alert_log` rows are deleted every 6 h (`src/retention.js`); `daily_stats` is kept | no (default) |
+| `RETENTION_DAYS` | `5` | DB history kept: older `calls`, `cdr`, `audit_log`, `activity_log`, closed `diag_issues`, `alert_log` rows are deleted every 6 h (`src/retention.js`); `daily_stats` is kept | no (default) |
 | `ASTERISK_LOG` | `/var/log/asterisk/full` | Asterisk CLI log for Diagnostics → Asterisk log (live follow + search), Registrations | no (default) |
 | `STATS_TZ` | `Asia/Kolkata` | day boundaries, working-hours checks, reports | no (default) |
 | `PJSIP_TRANSPORT_UDP` / `PJSIP_TRANSPORT_TCP` | empty | adds `transport=` lines (read in `render.js`) | no |
@@ -60,7 +59,6 @@ A correct `.env` for the current code (values replaced by placeholders):
 ```ini
 HTTP_HOST=0.0.0.0
 HTTP_PORT=3000
-SESSION_SECRET=<random 32+ chars>
 PUBLIC_IP=182.95.69.226
 SIP_PORT=5060
 ARI_URL=http://127.0.0.1:8088

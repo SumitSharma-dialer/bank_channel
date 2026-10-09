@@ -393,16 +393,16 @@ function inboundContext(t, processes, tz, routeUrl) {
 }
 
 // ------------------------------------------------- config for the customer side
+// Two files per flavour, as the customer pastes them: pjsip.conf + extensions.conf, or sip.conf + extensions.conf.
+// from_user must stay p_<code>: Asterisk identifies the endpoint by that name (see renderProcesses).
 function peerConfig(p, publicIp, sipPort = 5060, dids = []) {
   const ip = clean(publicIp);
-  const hdr = { did: HDR_DID, nn: HDR_NUM };
   const dummy = DUMMY_RE.test(String(p.dummy_cli || '')) ? p.dummy_cli : '<dummy number>';
   const byIp = p.auth_type === 'ip';
   const user = clean(p.sip_username);
   const pass = clean(p.sip_password);
-  const pj =
-`; ===== PJSIP (pjsip.conf) on the customer Asterisk "${clean(p.name)}" =====
-[sipdist]
+  const pjsip =
+`[sipdist]
 type=aor
 contact=sip:${ip}:${sipPort}
 qualify_frequency=60
@@ -425,8 +425,7 @@ ${byIp ? '' : `outbound_auth=sipdist-auth\nfrom_user=p_${p.code}\n`}
 type=identify
 endpoint=sipdist
 match=${ip}
-
-${!byIp ? `
+${byIp ? '' : `
 ; register: the distributor then shows you online and can send you inbound DID calls / callbacks
 [sipdist-reg]
 type=registration
@@ -436,29 +435,27 @@ client_uri=sip:p_${p.code}@${ip}:${sipPort}
 contact_user=${user}
 retry_interval=30
 expiration=300
-` : ''}
-; extensions.conf — every call: dial our number ${dummy} with the caller-ID DID and the customer number
-; in headers ${hdr.did} / ${hdr.nn} (digits, optional leading +; the DID must be one of the caller-ID DIDs
-; on our trunk). Max ${p.channel_limit} calls at once. Any other number or a missing header is rejected.
-[from-internal-sipdist]
-exten => _X.,1,Set(SD_USE_DID=1234)   ; <- the DID to show as caller ID
+`}`;
+  // outbound: dial our dummy number, caller-ID DID + customer number in headers; inbound DID calls / callbacks
+  const inbound = (dids.length ? `; your inbound DIDs: ${dids.map(clean).join(', ')}\n` : '') +
+`[from-sipdist]
+exten => _X.,1,NoOp(inbound call from \${EXTEN} to DID \${CALLERID(num)})
+ same => n,Goto(from-pstn,\${EXTEN},1)
+`;
+  const extPjsip =
+`[from-internal-sipdist]
+exten => _X.,1,Set(SD_USE_DID=1234)   ; <- DID to show as caller ID
  same => n,Dial(PJSIP/${dummy}@sipdist,60,b(sipdist-hdr^s^1(\${SD_USE_DID},\${EXTEN})))
  same => n,Hangup()
 
 [sipdist-hdr]
-exten => s,1,Set(PJSIP_HEADER(add,${hdr.did})=\${ARG1})
- same => n,Set(PJSIP_HEADER(add,${hdr.nn})=\${ARG2})
+exten => s,1,Set(PJSIP_HEADER(add,${HDR_DID})=\${ARG1})
+ same => n,Set(PJSIP_HEADER(add,${HDR_NUM})=\${ARG2})
  same => n,Return()
 
-; inbound calls from the distributor arrive here (callbacks to DIDs you used as X-DID${dids.length ? `, and your DIDs ${dids.map(clean).join(', ')}` : ''}):
-; number = the caller's (customer) number, caller ID = the DID that was called; also in headers X-Number / X-DID
-[from-sipdist]
-exten => _X.,1,NoOp(inbound call from \${EXTEN} to DID \${CALLERID(num)})
- same => n,Goto(from-pstn,\${EXTEN},1)   ; change to your inbound context
-`;
-  const chanSip =
-`; ===== chan_sip (sip.conf / ViciDial carrier) =====
-[sipdist]
+${inbound}`;
+  const sipConf =
+`[sipdist]
 type=friend
 host=${ip}
 port=${sipPort}
@@ -469,17 +466,25 @@ allow=alaw
 insecure=port,invite
 qualify=yes
 nat=force_rport,comedia
-
-; dialplan — every call: dial ${dummy} with the caller-ID DID + customer number in headers
-exten => _X.,1,SIPAddHeader(${hdr.did}: 1234)   ; <- the DID to show as caller ID
- same => n,SIPAddHeader(${hdr.nn}: \${EXTEN})
+${byIp ? '' : `
+; in the [general] section — register: you show online and receive inbound DID calls / callbacks
+register => p_${p.code}:${pass}:${user}@${ip}:${sipPort}
+`}`;
+  const extSip =
+`[from-internal-sipdist]
+exten => _X.,1,SIPAddHeader(${HDR_DID}: 1234)   ; <- DID to show as caller ID
+ same => n,SIPAddHeader(${HDR_NUM}: \${EXTEN})
  same => n,Dial(SIP/${dummy}@sipdist,60)
  same => n,Hangup()
-${!byIp ? `
-; [general] section of sip.conf — register: you show online and receive inbound DID calls / callbacks
-register => p_${p.code}:${pass}:${user}@${ip}:${sipPort}
-` : ''}`;
-  return { pjsip: pj.replace(/\n{3,}/g, '\n\n'), chan_sip: chanSip };
+
+${inbound}`;
+  const tidy = (t) => t.replace(/\n{3,}/g, '\n\n').trim() + '\n';
+  const files = {
+    pjsip: [{ name: 'pjsip.conf', text: tidy(pjsip) }, { name: 'extensions.conf', text: tidy(extPjsip) }],
+    chan_sip: [{ name: 'sip.conf', text: tidy(sipConf) }, { name: 'extensions.conf', text: tidy(extSip) }],
+  };
+  const all = (k) => files[k].map((f) => `${f.name}\n\n${f.text}`).join('\n\n');
+  return { pjsip: all('pjsip'), chan_sip: all('chan_sip'), files };
 }
 
 module.exports = { renderTrunks, renderProcesses, renderDialplan, peerConfig, didParts, NAME_RE, SIP_CAUSE, DEFAULT_REJECT };

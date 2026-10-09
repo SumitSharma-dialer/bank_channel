@@ -185,3 +185,13 @@ test('password peer config always registers (online status + inbound), IP peer c
   const ip = peerConfig({ ...proc, auth_type: 'ip', allowed_ips: '1.2.3.4' }, '10.0.0.1', 5060, ['1240']);
   assert.ok(!ip.pjsip.includes('type=registration') && !ip.chan_sip.includes('register =>'));
 });
+
+test('peer config: pjsip.conf + extensions.conf as separate files, from_user stays p_<code>', () => {
+  const c = peerConfig(proc, '10.0.0.1', 5060, []);
+  assert.deepStrictEqual(c.files.pjsip.map((f) => f.name), ['pjsip.conf', 'extensions.conf']);
+  assert.deepStrictEqual(c.files.chan_sip.map((f) => f.name), ['sip.conf', 'extensions.conf']);
+  const [pj, ext] = c.files.pjsip.map((f) => f.text);
+  assert.ok(pj.startsWith('[sipdist]\ntype=aor\n') && pj.includes('from_user=p_acme') && !pj.includes('exten'));
+  assert.ok(ext.startsWith('[from-internal-sipdist]\n') && ext.includes(' same => n,Dial(PJSIP/') && ext.includes('[sipdist-hdr]') && ext.includes('[from-sipdist]'));
+  assert.ok(c.pjsip.startsWith('pjsip.conf\n\n[sipdist]') && c.pjsip.includes('\n\nextensions.conf\n\n[from-internal-sipdist]'));
+});

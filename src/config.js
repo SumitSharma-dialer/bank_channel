@@ -3,7 +3,6 @@ const env = process.env;
 
 module.exports = {
   http: { host: env.HTTP_HOST || '0.0.0.0', port: +(env.HTTP_PORT || 3000) },
-  sessionSecret: env.SESSION_SECRET || 'dev-secret-change-me',
   adminPassword: env.ADMIN_PASSWORD || '',
   publicIp: env.PUBLIC_IP || '127.0.0.1',
   sipPort: +(env.SIP_PORT || 5060),

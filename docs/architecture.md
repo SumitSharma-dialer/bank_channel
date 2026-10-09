@@ -45,7 +45,8 @@ The running entry point is `src/server.js` (CommonJS). Files used by it:
 | `src/config.js` | Reads environment variables (see [credentials-and-config.md](credentials-and-config.md)) |
 | `src/db.js` | PostgreSQL pool, `audit()` helper |
 | `src/redis.js` | Redis client + Lua commands `sdIncr` / `sdDecr` |
-| `src/auth.js` | scrypt password hashing, HMAC-signed session cookie `sd_session` (12 h), first-admin creation |
+| `src/auth.js` | scrypt password hashing, DB-backed sessions (random token in cookie `sd_session`, 12 h, revocable), roles admin / viewer, first-admin creation |
+| `src/scope.js` | what a monitor-only (viewer) user may call and see: their tabs and processes (see [users.md](users.md)) |
 | `src/ari.js` | Minimal ARI client (REST + reconnecting events WebSocket) |
 | `src/tracker.js` | ARI events → Redis counters → `calls` / `daily_stats`; reconcile every 10 s; trunk status poll every 20 s |
 | `src/asterisk/render.js` | Pure functions: DB rows → `trunks.conf`, `processes.conf`, `dialplan.conf`, customer-side sample config |
@@ -53,7 +54,8 @@ The running entry point is `src/server.js` (CommonJS). Files used by it:
 | `src/routes/trunks.js` | `/api/trunks` CRUD + DID ranges |
 | `src/routes/processes.js` | `/api/processes` CRUD, DID assignment, limits, peer config |
 | `src/routes/reports.js` | `/api/reports` calls list, CSV export, daily stats, usage over time |
-| `src/routes/system.js` | `/api/system` health, re-apply, config preview, read-only Asterisk CLI, audit log, password change |
+| `src/routes/system.js` | `/api/system` health, re-apply, config preview, read-only Asterisk CLI, password change |
+| `src/activity.js`, `src/routes/activity.js` | activity log middleware (every `/api` request, sign-ins); `/api/activity` for the super-admin Activity page |
 | `src/routes/internal.js` | `/internal/did-route` — localhost only, called by the dialplan |
 | `src/routes/util.js` | Validation helpers |
 | `src/cli/dbinit.js` | `npm run db:init` — runs `db/schema.sql` and creates the first admin |

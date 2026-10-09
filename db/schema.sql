@@ -44,6 +44,36 @@ DO $$DECLARE c record; BEGIN  -- leftover NOT NULL columns from an older version
              AND column_name NOT IN ('id','username','pass_hash','created_at') LOOP
     EXECUTE format('ALTER TABLE admins ALTER COLUMN %I DROP NOT NULL', c.column_name);
   END LOOP; END$$;
+-- Users page: role 'admin' (everything) or 'viewer' (monitor-only TL: read-only, only the listed processes and tabs)
+ALTER TABLE admins ADD COLUMN IF NOT EXISTS role        VARCHAR(12) NOT NULL DEFAULT 'admin';
+ALTER TABLE admins ADD COLUMN IF NOT EXISTS full_name   VARCHAR(100);
+ALTER TABLE admins ADD COLUMN IF NOT EXISTS processes   TEXT[] NOT NULL DEFAULT '{}';   -- process codes (viewer)
+ALTER TABLE admins ADD COLUMN IF NOT EXISTS tabs        TEXT[] NOT NULL DEFAULT '{}';   -- live / cdr / stats (viewer)
+ALTER TABLE admins ADD COLUMN IF NOT EXISTS active      BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE admins ADD COLUMN IF NOT EXISTS last_login  TIMESTAMPTZ;
+-- role 'superadmin' (everything + Activity log). Once, when it is introduced: the existing admins become super admins
+-- (they already had full access); admins created afterwards are plain admins without the Activity log.
+DO $$BEGIN
+  IF NOT EXISTS (SELECT 1 FROM admins WHERE role = 'superadmin') THEN
+    UPDATE admins SET role = 'superadmin' WHERE role = 'admin';
+  END IF; END$$;
+
+-- Login sessions (src/auth.js): the cookie holds a random token, only its sha256 is stored.
+-- Revoked on sign-out, from the Users page, or when the user is disabled / gets a new password.
+CREATE TABLE IF NOT EXISTS sessions (
+  id          BIGSERIAL PRIMARY KEY,
+  token_hash  CHAR(64) UNIQUE NOT NULL,
+  username    VARCHAR(64) NOT NULL,
+  ip          VARCHAR(64),
+  user_agent  TEXT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at  TIMESTAMPTZ NOT NULL,
+  revoked_at  TIMESTAMPTZ,
+  revoked_by  VARCHAR(64)
+);
+CREATE INDEX IF NOT EXISTS sessions_user_idx ON sessions(username);
+CREATE INDEX IF NOT EXISTS sessions_open_idx ON sessions(expires_at) WHERE revoked_at IS NULL;
 
 
 -- ---------------------------------------------------------------- trunks
@@ -340,6 +370,25 @@ DO $$DECLARE c record; BEGIN  -- leftover NOT NULL columns from an older version
   END LOOP; END$$;
 
 CREATE INDEX IF NOT EXISTS audit_at ON audit_log(at DESC);
+
+-- ---------------------------------------------------------- activity_log
+-- Every API request of a signed-in user plus failed sign-ins (src/activity.js). Super admins only (Activity page).
+CREATE TABLE IF NOT EXISTS activity_log (
+  id        BIGSERIAL PRIMARY KEY,
+  at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  username  VARCHAR(64),
+  role      VARCHAR(12),
+  sid       BIGINT,
+  ip        VARCHAR(64),
+  method    VARCHAR(8) NOT NULL,
+  path      VARCHAR(200) NOT NULL,
+  query     TEXT,
+  status    SMALLINT,
+  ms        INTEGER,
+  action    VARCHAR(64)                  -- readable name, e.g. 'Opened CDR report', 'Edited trunk'
+);
+CREATE INDEX IF NOT EXISTS activity_at ON activity_log(at DESC);
+CREATE INDEX IF NOT EXISTS activity_user ON activity_log(username, at DESC);
 
 -- ------------------------------------------------------------------ cdr
 -- Asterisk's own CDR (cdr_pgsql). Keeps recording even if the Node backend is down.

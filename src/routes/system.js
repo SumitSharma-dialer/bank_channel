@@ -6,8 +6,7 @@ const redis = require('../redis');
 const ari = require('../ari');
 const applier = require('../asterisk/apply');
 const tracker = require('../tracker');
-const { hashPassword, verifyPassword } = require('../auth');
-const { Bad, wrap, str, int } = require('./util');
+const { Bad, wrap, int } = require('./util');
 
 router.get('/health', wrap(async (req, res) => {
   const out = { asterisk: null, ari: ari.connected, db: false, redis: false, apply: applier.status() };
@@ -55,21 +54,6 @@ router.get('/cli/:what', wrap(async (req, res) => {
   execFile('asterisk', ['-rx', cmd], { timeout: 5000, maxBuffer: 2 << 20 }, (err, stdout, stderr) => {
     res.json({ cmd, output: err ? `error: ${err.message}\n${stderr || ''}` : stdout });
   });
-}));
-
-router.get('/audit', wrap(async (req, res) => {
-  const limit = int(req.query.limit, { min: 1, max: 500, def: 100 });
-  res.json((await q(`SELECT * FROM audit_log ORDER BY at DESC LIMIT ${limit}`)).rows);
-}));
-
-router.post('/password', wrap(async (req, res) => {
-  const cur = str(req.body.current, 200), next = str(req.body.next, 200);
-  if (next.length < 8) throw new Bad('new password must be at least 8 characters');
-  const a = (await q('SELECT * FROM admins WHERE username=$1', [req.user])).rows[0];
-  if (!a || !verifyPassword(cur, a.pass_hash)) throw new Bad('current password is wrong');
-  await q('UPDATE admins SET pass_hash=$1 WHERE id=$2', [hashPassword(next), a.id]);
-  await audit(req.user, 'password', 'admin', a.id, null);
-  res.json({ ok: true });
 }));
 
 module.exports = router;

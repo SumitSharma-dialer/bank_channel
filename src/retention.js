@@ -13,8 +13,10 @@ const RULES = [
   ['calls', 'start_time < $1'],
   ['cdr', 'calldate < $1'],
   ['audit_log', 'at < $1'],
+  ['activity_log', 'at < $1'],
   ['diag_issues', 'closed_at < $1'],   // open issues are kept however old
   ['alert_log', 'at < $1'],
+  ['sessions', 'expires_at < $1'],   // login sessions that ended more than RETENTION_DAYS ago
 ];
 
 async function run() {

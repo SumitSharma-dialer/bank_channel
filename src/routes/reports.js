@@ -3,6 +3,7 @@ const router = require('express').Router();
 const { q } = require('../db');
 const tracker = require('../tracker');
 const { wrap, str, int } = require('./util');
+const { isViewer } = require('../scope');
 
 const DISPS = ['ANSWERED', 'BUSY', 'NO_ANSWER', 'CANCEL', 'CONGESTION', 'FAILED',
   'CHANNEL_LIMIT', 'TRUNK_LIMIT', 'BLOCKED', 'NO_ROUTE', 'INVALID', 'OFF_HOURS', 'NO_HEADER', 'INVALID_DID', 'SIP_DOWN'];
@@ -15,7 +16,8 @@ function dateRange(qs) {
   return { from, to };
 }
 
-function callFilter(qs) {
+// monitor-only users: their processes only (a process filter outside the list matches nothing)
+function callFilter(qs, a) {
   const { from, to } = dateRange(qs);
   const tz = require('../config').statsTz.replace(/[^A-Za-z0-9_/+\-]/g, '');
   const where = [`start_time >= ($1::date)::timestamp AT TIME ZONE '${tz}'`,
@@ -23,6 +25,7 @@ function callFilter(qs) {
   const args = [from, to];
   const add = (sql, v) => { args.push(v); where.push(sql.replace('?', '$' + args.length)); };
   if (qs.process) add('process_code = ?', str(qs.process, 32));
+  if (isViewer(a)) add('process_code = ANY(?)', a.processes);
   if (qs.trunk) add('trunk_name = ?', str(qs.trunk, 32));
   if (qs.disposition && DISPS.includes(qs.disposition)) add('disposition = ?', qs.disposition);
   if (qs.direction === 'in' || qs.direction === 'out') add('direction = ?', qs.direction);
@@ -35,7 +38,7 @@ function callFilter(qs) {
 }
 
 router.get('/calls', wrap(async (req, res) => {
-  const f = callFilter(req.query);
+  const f = callFilter(req.query, req.auth);
   const size = int(req.query.size, { min: 10, max: 500, def: 50 });
   const page = int(req.query.page, { min: 1, max: 100000, def: 1 });
   const dir = req.query.sort === 'asc' ? 'ASC' : 'DESC';   // by call time, newest first by default
@@ -48,7 +51,7 @@ router.get('/calls', wrap(async (req, res) => {
 }));
 
 router.get('/calls.csv', wrap(async (req, res) => {
-  const f = callFilter(req.query);
+  const f = callFilter(req.query, req.auth);
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', `attachment; filename="cdr_${f.from}_${f.to}.csv"`);
   const cols = ['start_time', 'answer_time', 'end_time', 'direction', 'process_code', 'trunk_name', 'src_ip', 'cli_in', 'cli_out',
@@ -71,10 +74,12 @@ router.get('/calls.csv', wrap(async (req, res) => {
 
 router.get('/daily', wrap(async (req, res) => {
   const { from, to } = dateRange(req.query);
-  const scope = ['trunk', 'did'].includes(req.query.scope) ? req.query.scope : 'process';
+  const viewer = isViewer(req.auth);   // monitor-only: per process, their processes only
+  const scope = !viewer && ['trunk', 'did'].includes(req.query.scope) ? req.query.scope : 'process';
   const args = [from, to, scope];
   let extra = '';
-  if (req.query.ref) { args.push(str(req.query.ref, 32)); extra = ' AND ref=$4'; }
+  if (req.query.ref) { args.push(str(req.query.ref, 32)); extra += ` AND ref=$${args.length}`; }
+  if (viewer) { args.push(req.auth.processes); extra += ` AND ref = ANY($${args.length})`; }
   const { rows } = await q(`SELECT to_char(day,'YYYY-MM-DD') AS day, ref, total, answered, busy, no_answer, cancel, congestion, failed,
       channel_limit, trunk_limit, blocked, no_route, invalid, off_hours, no_header, invalid_did, sip_down, talk_sec, peak_channels
     FROM daily_stats WHERE day BETWEEN $1 AND $2 AND scope=$3${extra} ORDER BY day DESC, ref`, args);
@@ -86,7 +91,8 @@ router.get('/daily', wrap(async (req, res) => {
 const USAGE_COL = { process: 'process_code', trunk: 'trunk_name', did: 'did' };
 router.get('/usage', wrap(async (req, res) => {
   const { from, to } = dateRange(req.query);
-  const scope = USAGE_COL[req.query.scope] ? req.query.scope : 'process';
+  const viewer = isViewer(req.auth);
+  const scope = !viewer && USAGE_COL[req.query.scope] ? req.query.scope : 'process';
   const col = USAGE_COL[scope];
   const tz = require('../config').statsTz.replace(/[^A-Za-z0-9_/+\-]/g, '');
   const days = Math.round((Date.parse(to) - Date.parse(from)) / 864e5) + 1;
@@ -97,6 +103,7 @@ router.get('/usage', wrap(async (req, res) => {
   const args = [from, to];
   let where = `${col} IS NOT NULL AND ${col} <> '' AND start_time < ${hi} AND end_time >= ${lo}`;
   if (req.query.ref) { args.push(str(req.query.ref, 32)); where += ` AND ${col} = $${args.length}`; }
+  if (viewer) { args.push(req.auth.processes); where += ` AND process_code = ANY($${args.length})`; }
   const top = (await q(`SELECT ${col} AS ref FROM calls WHERE ${where} GROUP BY 1 ORDER BY count(*) DESC LIMIT 7`, args)).rows.map((r) => r.ref);
   args.push(top);
   const ref = `CASE WHEN ${col} = ANY($${args.length}) THEN ${col} ELSE '' END`;   // '' = Other

@@ -2,7 +2,11 @@
 
 Found while checking the live server against the code. Nothing here has been changed yet.
 
-## 1. `SESSION_SECRET` is not set — sessions can be forged (high)
+## 1. ~~`SESSION_SECRET` is not set — sessions can be forged (high)~~ — fixed 2026-10-09
+
+Sessions are now random tokens stored (hashed) in table `sessions` (see [users.md](users.md)), so there is no signing
+key to forge with and `SESSION_SECRET` is no longer read. The original finding:
+
 
 `src/config.js` uses `SESSION_SECRET`, and falls back to `dev-secret-change-me` if it is missing. The live `.env`
 has no `SESSION_SECRET` (it has `JWT_SECRET`, which nothing reads), and the running process doesn't have it either.
@@ -17,7 +21,7 @@ get admin access without a password.
 | In live `.env` | What the code reads | What happens now |
 |---|---|---|
 | `HOST`, `PORT` | `HTTP_HOST`, `HTTP_PORT` | defaults `0.0.0.0:3000` (same values, so nothing breaks) |
-| `JWT_SECRET` | `SESSION_SECRET` | insecure default — see #1 |
+| `JWT_SECRET` | nothing | ignored (sessions no longer need a secret, see #1) |
 | `ADMIN_USER`, `ADMIN_PASS` | `ADMIN_PASSWORD` (first start only) | ignored |
 | `ASTERISK_GEN_DIR` | `ASTERISK_CONF_DIR` | default `/etc/asterisk/sipdist` (same value) |
 | `TZ`, `NODE_ENV` | `STATS_TZ` | default `Asia/Kolkata` (same value) |

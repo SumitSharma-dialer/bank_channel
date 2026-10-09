@@ -94,7 +94,7 @@ Asterisk `full` and `messages.log` are kept **3 days**, everything else **5 days
 | App log (`[http]`, `[ari]`, `[apply]`, `[retention]` …) and the rest of the system journal | journald (`journalctl -u sipdist`) | 5 days | `/etc/systemd/journald.conf.d/sipdist-retention.conf` ← `deploy/journald-retention.conf`: `MaxRetentionSec=5day` |
 | Call history | `calls`, `cdr` | 5 days | `src/retention.js`, 1 min after start then every 6 h, batches of 5000 rows; `RETENTION_DAYS` in `.env` changes it |
 | CPU / RAM / storage history (System → graph icon on each Server resources tile) | `sys_metrics` | 5 days | `src/sysinfo.js`: one row per minute, rows older than 5 days deleted every hour (not `RETENTION_DAYS`) |
-| Audit log, Diagnostics issues (closed), alert log | `audit_log`, `diag_issues` (`closed_at`), `alert_log` | 5 days | same job; open issues are kept however old |
+| Audit log, activity log, Diagnostics issues (closed), alert log | `audit_log`, `activity_log`, `diag_issues` (`closed_at`), `alert_log` | 5 days | same job; open issues are kept however old |
 | Reports | `daily_stats` | **kept** (not deleted) | one row per process / trunk / DID per day — Reports still show older days |
 
 Not changed: OS logs from rsyslog (`/var/log/syslog`, `auth.log` …) keep Ubuntu's weekly × 4.
@@ -140,7 +140,8 @@ Login is rate-limited to 10 failures per IP per 15 minutes.
 
 | Method & path | Purpose |
 |---|---|
-| `POST /api/login` `{username,password}` / `POST /api/logout` / `GET /api/me` | session |
+| `POST /api/login` `{username,password}` / `POST /api/logout` / `GET /api/me` | session (`/api/me` includes `role`, and for monitor users `tabs` + `processes`) |
+| `/api/users…`, `POST /api/me/password` | users and sessions, see [users.md](users.md) |
 | `GET /api/live` | live snapshot (also pushed every 1 s on WebSocket `/ws`, plus `hit` and `call` events) |
 | `GET/POST /api/trunks`, `PUT/DELETE /api/trunks/:id`, `POST /api/trunks/:id/active` | trunks + `did_ranges` |
 | `GET/POST /api/processes`, `PUT/DELETE /api/processes/:id` | processes + `dids` |
@@ -173,7 +174,8 @@ Login is rate-limited to 10 failures per IP per 15 minutes.
 | `GET /api/diag/pcap?tool=tcpdump\|sngrep&seconds&target&host&port&match&sip&rtp` | capture download (tcpdump streamed; sngrep keeps dialogs matching `match`) |
 | `POST /api/diag/rtp/capture` `{seconds,target,host}`, `GET /api/diag/rtp/channels` | RTP stream analysis; live per-channel RTP counters |
 | `GET /api/diag/log?q&levels&lines` | Asterisk log search |
-| `GET /api/system/audit?limit=` | audit log |
+| `GET /api/activity?from&to&user&q&writes&failed&page&size` | **super admin only**: activity log (every request / sign-in of every user) |
+| `GET /api/activity/changes?from&to&user&q&page&size` | **super admin only**: audit log (saved changes with values) |
 | `POST /api/system/password` `{current,next}` | change own password (min 8 chars) |
 | `GET /internal/did-route?did&from` | **localhost only**, no login — used by inbound dialplan CURL |
 

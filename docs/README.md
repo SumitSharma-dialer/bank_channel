@@ -12,6 +12,7 @@ host `172.20.10.201` (public `182.95.69.226` via NAT), app in `/opt/sipdist`, As
 | [operations.md](operations.md) | Service management, capacity (how many calls) and tuning, logs, HTTP API, CLI tools, troubleshooting, backup |
 | [processes.md](processes.md) | Processes page: IP vs username + password authentication, every form field (IPs, SIP port, IP lock), the list columns, Connection online / offline and how it is checked, Peer config |
 | [diagnostics.md](diagnostics.md) | Diagnostics page (issue tracker, SIP trace, RTP, tcpdump, log search) and custom dispositions (LIMIT_REACH, SIP_DOWN, SIP response per reject) |
+| [users.md](users.md) | Users page: super admin, admin and monitor-only (team leader) users, the super-admin Activity log with chosen processes and tabs, login sessions and how to sign them out |
 | [known-issues.md](known-issues.md) | Problems found while writing these docs (config mismatches, dead code, schema drift) |
 | [client/SIPDist-New-Features-Oct-2026.pdf](client/SIPDist-New-Features-Oct-2026.pdf) | Client handout: trunk CPS limit, resource history graphs, live Asterisk log in Diagnostics, log retention (October 2026) |
 | [client/Carrier-Trunk-Setup-Route2Shine.pdf](client/Carrier-Trunk-Setup-Route2Shine.pdf) | Carrier trunk setup for ROUTE 2 SHINE (pilot 8064258400): eno2 network + routes, UI steps, go-live checklist, troubleshooting |

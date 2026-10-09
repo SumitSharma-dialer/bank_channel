@@ -207,8 +207,6 @@ pre.code { background: var(--panel-2); border: 1px solid var(--line); border-rad
 .did-row .check { font-size: 12.5px; white-space: nowrap; }
 @media (max-width: 720px) { .did-row { grid-template-columns: 1fr 1fr; } }
 .did-pick { display: flex; flex-direction: column; gap: 6px; }
-.did-pick .check small { color: var(--ink-3); }
-.did-pick .check.taken { opacity: .55; }
 
 /* ---------- trunk cards */
 .tcards { display: flex; flex-direction: column; gap: 14px; }
@@ -252,17 +250,10 @@ pre.code { background: var(--panel-2); border: 1px solid var(--line); border-rad
 .daypick input:focus-visible + span { outline: 2px solid var(--accent); }
 
 /* per-DID picker in the process form */
-.did-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.did-tools b { font-size: 12.5px; margin-right: auto; }
-.did-tools input { width: 220px; max-width: 100%; }
-.did-grp { display: flex; flex-direction: column; gap: 4px; }
-.did-grp small { color: var(--ink-3); }
-.did-grp.taken { opacity: .6; }
 .did-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .dchip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border: 1px solid var(--line-2); border-radius: 6px; font-size: 12.5px; cursor: pointer; background: var(--panel); }
 .dchip:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
 .dchip input { margin: 0; }
-#didText { width: 100%; }
 
 /* ---------- diagnostics */
 .nbadge { margin-left: auto; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: #ff6b5e; color: #fff; font: 600 11px/20px var(--mono); text-align: center; }
@@ -351,3 +342,25 @@ details.setup pre { margin-top: 8px; white-space: pre-wrap; }
 @media (max-width: 640px) { .panel > h2:has(.uctl) { flex-wrap: wrap; gap: 6px; } }
 ol.steps { margin: 10px 0 12px; padding-left: 20px; font-size: 13px; color: var(--ink-2); display: flex; flex-direction: column; gap: 7px; line-height: 1.5; }
 ol.steps code, details.setup .hint code { font-size: 12px; }
+/* process form: DID picker by range */
+.did-add { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+.did-add label { width: 190px; max-width: 100%; }
+.did-sum { font-size: 12.5px; margin-left: auto; align-self: center; }
+.did-sel { display: flex; flex-wrap: wrap; gap: 6px; min-height: 26px; align-items: center; }
+.dsel { display: inline-flex; align-items: center; gap: 6px; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 999px; padding: 2px 4px 2px 10px; font-size: 12.5px; }
+.dsel small { color: var(--ink-3); }
+.dsel button { border: 0; background: none; cursor: pointer; color: var(--ink-3); font-size: 15px; line-height: 1; padding: 0 4px; }
+.dsel button:hover { color: var(--bad); }
+.did-ranges { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 8px; max-height: 320px; overflow: auto; }
+.did-rg { display: grid; grid-template-columns: auto auto 1fr auto; gap: 4px 10px; align-items: center; padding: 6px 10px; border-top: 1px solid var(--line); font-size: 13px; }
+.did-rg:first-child { border-top: 0; }
+.did-rg small { color: var(--ink-3); }
+.did-rg small b.on { color: var(--accent); }
+.did-rg.taken { grid-template-columns: auto 1fr; opacity: .6; padding-left: 40px; }
+.did-rg .did-chips { grid-column: 1 / -1; padding: 4px 0 2px; }
+.did-rg.open .tc-toggle i { transform: rotate(90deg); }
+.did-rg-act { display: flex; gap: 6px; }
+@media (max-width: 720px) { .did-rg { grid-template-columns: auto 1fr; } .did-rg small, .did-rg-act { grid-column: 2; } }
+.pfile + .pfile { margin-top: 12px; }
+.pfile-h { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.pfile pre.code { max-height: 300px; }

@@ -6,7 +6,7 @@
 - Schema source: `db/schema.sql` — idempotent, safe to re-run (`npm run db:init`). It creates missing tables/columns,
   relaxes leftover NOT NULL columns, and renames tables whose primary key is incompatible to `<name>_legacy_<timestamp>`.
 - **Retention: 5 days** (`RETENTION_DAYS`). `src/retention.js` deletes older rows of `calls`, `cdr`, `audit_log`,
-  `alert_log` and closed `diag_issues` every 6 h. `daily_stats` is kept (Reports). `sys_metrics` (one CPU / RAM /
+  `activity_log`, `alert_log` and closed `diag_issues` every 6 h. `daily_stats` is kept (Reports). `sys_metrics` (one CPU / RAM /
   storage sample per minute for the System page resource graphs (graph icon on each tile): `at`, `cpu` %, `mem_used` / `mem_total` bytes, `disks` jsonb
   `[{mount, used, total}]`) is pruned to 5 days by `src/sysinfo.js` itself. See
   [operations.md § Logs and data retention](operations.md#logs-and-data-retention).
@@ -31,6 +31,22 @@ daily_stats (day, scope, ref)     ref = process code | trunk name | DID
 | username | varchar(64) unique | first user is `admin` |
 | pass_hash | text | `scrypt$<salt hex>$<hash hex>` (`src/auth.js`) |
 | created_at | timestamptz | |
+| role | varchar(12) | `superadmin`, `admin` (default) or `viewer` (monitor-only), see [users.md](users.md). When `superadmin` was introduced, every existing `admin` became `superadmin` (only if no super admin exists yet) |
+| full_name | varchar(100) | |
+| processes | text[] | viewer: process codes they can see |
+| tabs | text[] | viewer: `live` / `cdr` / `stats` |
+| active | boolean | false = cannot sign in |
+| last_login | timestamptz | |
+
+### `sessions` — login sessions (`src/auth.js`)
+| Column | Type | Notes |
+|---|---|---|
+| id | bigserial PK | |
+| token_hash | char(64) unique | sha256 of the `sd_session` cookie token |
+| username | varchar(64) | |
+| ip / user_agent | | updated at most once a minute |
+| created_at / last_seen / expires_at | timestamptz | 12 h lifetime |
+| revoked_at / revoked_by | | sign-out, Users page, disable, new password |
 
 ### `trunks` — carrier SIP trunks → `/etc/asterisk/sipdist/trunks.conf`
 | Column | Type | Default | Notes |
@@ -142,6 +158,13 @@ on the Dispositions page. See [diagnostics.md](diagnostics.md#dispositions-page-
 
 ### `audit_log` — who changed what
 `id, at, admin, action (create/update/delete/limit/activate/deactivate/apply/login/password/…), entity, entity_id, details jsonb`.
+Shown on the Activity page → **Changes** tab (super admins only).
+
+### `activity_log` — what every user did (`src/activity.js`)
+`id, at, username, role, sid (session), ip, method, path, query, status, ms, action` (readable name, e.g.
+`Exported CDR CSV`). One row per `/api` request of a signed-in user, plus sign-in, sign-out and failed / blocked
+sign-ins. Timer refreshes sent with `X-Poll: 1` are skipped, and the same GET of one session is written at most once a
+minute. Indexes `activity_at (at DESC)`, `activity_user (username, at DESC)`. Super admins only (Activity page).
 
 ### `cdr` — Asterisk's own CDR table for `cdr_pgsql`
 Standard Asterisk columns (`calldate, clid, src, dst, dcontext, channel, dstchannel, lastapp, lastdata, duration,

@@ -14,10 +14,20 @@ const clock = (ms) => new Date(ms).toLocaleTimeString('en-GB', { timeZone: S.tz 
 const dayStr = (d = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: S.tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
 const daysAgo = (n) => dayStr(new Date(Date.now() - n * 86400e3));
 
+// monitor-only users (role viewer, e.g. team leaders) see only their tabs and processes; the server enforces the same
+const isViewer = () => S.me && S.me.role === 'viewer';
+const isSuper = () => S.me && S.me.role === 'superadmin';
+// Activity log: super admins only
+const canSee = (page) => (page === 'activity' ? isSuper() : !isViewer() || (S.me.tabs || []).includes(page));
 const S = { me: null, tz: 'Asia/Kolkata', snap: null, trunks: [], processes: [], dispositions: [], feed: [], ws: null, page: null };
 
+// requests started inside bg() are timer refreshes: marked X-Poll so they stay out of the activity log
+let inBg = false;
+const bg = (fn) => { inBg = true; try { return fn(); } finally { inBg = false; } };
 async function api(method, url, body) {
-  const res = await fetch(url, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
+  const headers = body ? { 'Content-Type': 'application/json' } : {};
+  if (inBg) headers['X-Poll'] = '1';
+  const res = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined });
   if (res.status === 401 && url !== '/api/login') { showLogin(); throw new Error('login required'); }
   const data = res.headers.get('content-type')?.includes('json') ? await res.json() : await res.text();
   if (!res.ok) throw new Error(data && data.error ? data.error : `HTTP ${res.status}`);
@@ -70,19 +80,31 @@ const confirmBox = (title, text, okLabel = 'Delete') => new Promise((resolve) =>
 const formData = (form) => Object.fromEntries([...new FormData(form).entries()].map(([k, v]) => [k, typeof v === 'string' ? v.trim() : v]));
 
 // ------------------------------------------------------------------ auth
-function showLogin() { $('#app').classList.add('hidden'); $('#login').classList.remove('hidden'); if (S.ws) { S.ws.onclose = null; S.ws.close(); S.ws = null; } }
+function showLogin() { S.feed = []; S.snap = null; S.me = null; $('#app').classList.add('hidden'); $('#login').classList.remove('hidden'); if (S.ws) { S.ws.onclose = null; S.ws.close(); S.ws = null; } }
 $('#loginForm').addEventListener('submit', async (e) => {
   e.preventDefault(); $('#loginErr').textContent = '';
   try { await api('POST', '/api/login', formData(e.target)); boot(); }
   catch (err) { $('#loginErr').textContent = err.message; }
 });
 $('#logout').addEventListener('click', async () => { await api('POST', '/api/logout'); showLogin(); });
+$('#myPw').addEventListener('click', () => openModal('Change your password', `<form class="mbody" id="mpf" style="display:flex;flex-direction:column;gap:10px">
+    <label>Current password<input type="password" name="current" required autocomplete="current-password"></label>
+    <label>New password <small>at least 8 characters</small><input type="password" name="next" required minlength="8" autocomplete="new-password"></label>
+    <p class="hint">Your other sessions (other browsers / devices) are signed out.</p>
+    <p class="err" id="mpErr"></p><div class="mfoot"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary">Change password</button></div></form>`, (c) => {
+  $('#mpf', c).onsubmit = async (e) => {
+    e.preventDefault();
+    try { const r = await api('POST', '/api/me/password', formData(e.target)); closeModal(); toast(`Password changed${r.otherSessionsEnded ? ` · ${r.otherSessionsEnded} other session(s) signed out` : ''}`); }
+    catch (er) { $('#mpErr', c).textContent = er.message; }
+  };
+}));
 
 async function boot() {
   try { S.me = await api('GET', '/api/me'); } catch { return showLogin(); }
   S.tz = S.me.tz || S.tz;
   $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
-  $('#who').textContent = S.me.user;
+  $('#who').textContent = S.me.user + (isViewer() ? ' · monitor' : isSuper() ? ' · super admin' : '');
+  $$('#nav a').forEach((a) => a.classList.toggle('hidden', !canSee(a.dataset.page)));
   S.dispositions = await api('GET', '/api/reports/dispositions').catch(() => []);
   connectWs(); route();
 }
@@ -98,7 +120,8 @@ function connectWs() {
     if (type === 'hit' && S.page === 'live') Live.hit(data);
     if (type === 'call') { S.feed.unshift(data); S.feed.length = Math.min(S.feed.length, 60); if (S.page === 'live') Live.feed(data); }
   };
-  ws.onclose = () => { S.ws = null; setConn(null); setTimeout(() => { if (!$('#app').classList.contains('hidden')) connectWs(); }, 2000); };
+  ws.onclose = (ev) => { S.ws = null; setConn(null);
+    if (ev.code === 4401) { toast('Your session was ended — sign in again', true); showLogin(); return; } setTimeout(() => { if (!$('#app').classList.contains('hidden')) connectWs(); }, 2000); };
 }
 function issueBadge(i) {
   const b = $('#navIssues'); if (!i) return;
@@ -116,7 +139,8 @@ function setConn(ari) {
 const PAGES = {};
 function route() {
   const page = (location.hash.replace(/^#\//, '') || 'live').split('?')[0];
-  const p = PAGES[page] ? page : 'live';
+  const first = ['live', 'cdr', 'stats'].find(canSee) || 'live';
+  const p = PAGES[page] && canSee(page) ? page : first;
   S.page = p;
   $$('#nav a').forEach((a) => a.classList.toggle('on', a.dataset.page === p));
   closeModal();
@@ -136,7 +160,7 @@ const Live = {
         <div class="panel kpi"><div class="lab">Live channels</div><div class="val num" id="kLive">0</div><div class="meter" id="kLiveM"><span></span></div><div class="sub" id="kLiveS"></div></div>
         <div class="panel kpi"><div class="lab">Hits / minute</div><div class="val num" id="kHits">0</div><div class="sub" id="kHitsS"></div></div>
         <div class="panel kpi"><div class="lab">Peak today</div><div class="val num" id="kPeak">0</div><div class="sub">concurrent channels</div></div>
-        <div class="panel kpi"><div class="lab">Trunks up</div><div class="val num" id="kTr">0</div><div class="sub" id="kTrS"></div></div>
+        <div class="panel kpi${isViewer() ? ' hidden' : ''}"><div class="lab">Trunks up</div><div class="val num" id="kTr">0</div><div class="sub" id="kTrS"></div></div>
       </div>
       <div class="grid live-top">
         <div class="panel"><h2>Call flow <span id="gNote" style="text-transform:none;letter-spacing:0;font-weight:500"></span></h2>
@@ -146,7 +170,7 @@ const Live = {
       </div>
       <div class="grid two">
         <div class="panel"><h2>Processes</h2><div class="tw"><table><thead><tr><th>Process</th><th>Usage</th><th class="r">Hits/min</th><th class="r">Today</th><th class="r">Peak</th></tr></thead><tbody id="lvP"></tbody></table></div></div>
-        <div class="panel"><h2>SIP trunks</h2><div class="tw"><table><thead><tr><th>Trunk</th><th>Usage</th><th>Status</th><th class="r">Peak</th></tr></thead><tbody id="lvT"></tbody></table></div></div>
+        <div class="panel${isViewer() ? ' hidden' : ''}"><h2>SIP trunks</h2><div class="tw"><table><thead><tr><th>Trunk</th><th>Usage</th><th>Status</th><th class="r">Peak</th></tr></thead><tbody id="lvT"></tbody></table></div></div>
       </div>`;
     Live.feed();
     if (S.snap) Live.update(); else api('GET', '/api/live').then((s) => { S.snap = s; Live.update(); }).catch(() => {});
@@ -158,18 +182,19 @@ const Live = {
     $('#kLive').innerHTML = `${fmtInt(s.live)}<small> / ${fmtInt(cap)}</small>`;
     const p = pct(s.live, cap);
     $('#kLiveM').className = 'meter ' + (p >= 95 ? 'bad' : p >= 80 ? 'warn' : ''); $('#kLiveM span').style.width = Math.min(100, p) + '%';
-    $('#kLiveS').textContent = `${p}% of trunk capacity · ${fmtInt(s.processCapacity)} sold to processes`;
+    $('#kLiveS').textContent = s.viewer ? `${p}% of your processes' channel limit` : `${p}% of trunk capacity · ${fmtInt(s.processCapacity)} sold to processes`;
     $('#kHits').textContent = fmtInt(s.hitsMin);
     $('#kHitsS').textContent = `${fmtInt(s.hitsToday)} calls received today`;
     $('#kPeak').textContent = fmtInt(s.peakToday);
+    if (s.viewer) $('#kPeak').nextElementSibling.textContent = 'sum of your process peaks';
     const up = s.trunks.filter((t) => t.active && t.state === 'online').length;
     $('#kTr').innerHTML = `${up}<small> / ${s.trunks.filter((t) => t.active).length}</small>`;
     $('#kTrS').textContent = s.ariConnected ? 'qualify status from Asterisk' : 'Asterisk not connected';
 
     $('#lvP').innerHTML = s.processes.length ? s.processes.map((x) => `<tr>
-      <td class="t-name"><b>${esc(x.name)}</b><small>${esc(x.code)} → ${esc(x.trunk || 'no trunk')}${x.active ? '' : ' · inactive'}</small></td>
+      <td class="t-name"><b>${esc(x.name)}</b><small>${esc(x.code)}${s.viewer ? '' : ` → ${esc(x.trunk || 'no trunk')}`}${x.active ? '' : ' · inactive'}</small></td>
       <td>${usage(x.live, x.limit)}</td><td class="r num">${fmtInt(x.hitsMin)}</td><td class="r num">${fmtInt(x.hitsToday)}</td><td class="r num">${fmtInt(x.peak)}</td></tr>`).join('')
-      : `<tr><td colspan="5" class="empty">No processes yet — <a href="#/processes">add one</a></td></tr>`;
+      : `<tr><td colspan="5" class="empty">${s.viewer ? 'No processes assigned to your user — ask an admin.' : 'No processes yet — <a href="#/processes">add one</a>'}</td></tr>`;
     $('#lvT').innerHTML = s.trunks.length ? s.trunks.map((t) => `<tr>
       <td class="t-name"><b>${esc(t.name)}</b><small>${fmtInt(t.assigned)} ch assigned</small></td>
       <td>${usage(t.live, t.max)}</td><td>${trunkStatus(t)}</td><td class="r num">${fmtInt(t.peak)}</td></tr>`).join('')
@@ -196,7 +221,7 @@ const Live = {
       procs.forEach((p, i) => { svg += `<g class="g-node${p.active ? '' : ' off'}" id="n-p-${p.code}" transform="translate(20,${py[i] - nh / 2})"><rect width="${nw}" height="${nh}" rx="8"/><text x="12" y="17">${esc(p.code)}</text><text class="sub" x="12" y="32" data-v></text></g>`; });
       svg += `<g class="g-node g-hub" transform="translate(${hub.x},${hub.y})"><rect width="${hub.w}" height="${hub.h}" rx="10"/><text x="${hub.w / 2}" y="27" text-anchor="middle">SIPDist</text><text class="sub" x="${hub.w / 2}" y="46" text-anchor="middle" id="hubV"></text></g>`;
       trunks.forEach((t, i) => { svg += `<g class="g-node${t.active ? '' : ' off'}" id="n-t-${t.name}" transform="translate(${W - 20 - nw},${ty[i] - nh / 2})"><rect width="${nw}" height="${nh}" rx="8"/><text x="12" y="17">${esc(t.name)}</text><text class="sub" x="12" y="32" data-v></text></g>`; });
-      if (!procs.length && !trunks.length) svg += `<text x="${W / 2}" y="${H / 2 + 60}" text-anchor="middle" fill="currentColor" opacity=".5">Add a trunk and a process to see the flow</text>`;
+      if (!procs.length && !trunks.length && !s.viewer) svg += `<text x="${W / 2}" y="${H / 2 + 60}" text-anchor="middle" fill="currentColor" opacity=".5">Add a trunk and a process to see the flow</text>`;
       box.innerHTML = svg + '</svg>';
     }
     const width = (live, max) => 1.5 + Math.min(9, max ? (live / max) * 9 : live ? 4 : 0);
@@ -469,7 +494,7 @@ PAGES.processes = async (main) => {
   [S.trunks] = await Promise.all([api('GET', '/api/trunks')]);
   await loadProcs();
   clearInterval(S.regTimer);   // connection status every 15 s while this page is open
-  S.regTimer = setInterval(() => { if (S.page !== 'processes') clearInterval(S.regTimer); else if (!document.hidden) loadRegs(); }, 15000);
+  S.regTimer = setInterval(() => { if (S.page !== 'processes') clearInterval(S.regTimer); else if (!document.hidden) bg(loadRegs); }, 15000);
 };
 // online / offline. password auth: online = registered to us
 // IP auth: online = customer server answers our OPTIONS ping (every 60 s)
@@ -611,65 +636,121 @@ async function procForm(p) {
       h.textContent = t.max_channels ? `${t.name}: ${total} of ${t.max_channels} channels sold to processes${over ? ' — oversubscribed: the trunk limit will reject extra calls (TRUNK_LIMIT)' : ''}.` : `${t.name} has no channel cap.`;
     };
     f.addEventListener('input', sync); f.addEventListener('change', sync); sync();
-    // DID picker for the selected trunk: tick single DIDs; free DIDs + this process's DIDs are selectable.
-    // Small trunks show one checkbox per DID, big ones (> DID_GRID) a text box with runs like 1240-1249.
+    // DID picker for the selected trunk, by range: add / remove From–To runs, All / None per trunk range, or expand a
+    // range to tick single DIDs. The selection is kept as merged runs (BigInt), so big trunks never list every number.
     const pick = $('#didPick', c);
-    const DID_GRID = 2000;
-    const bi = (x) => BigInt(x), cmpDid = (a, b) => a.length - b.length || (bi(a) < bi(b) ? -1 : bi(a) > bi(b) ? 1 : 0);
-    const nums = (r) => { const out = [], len = r.first_did.length; for (let n = bi(r.first_did); n <= bi(r.last_did); n++) out.push(n.toString().padStart(len, '0')); return out; };
-    const runs = (list) => [...list].sort(cmpDid).reduce((out, d) => {
+    const CHIPS_MAX = 500;   // a range can be expanded into single checkboxes up to this size
+    const bi = (x) => BigInt(x);
+    const pad = (n, len) => n.toString().padStart(len, '0');
+    let sel = [], curTrunk, open = new Set();   // sel: [{ a, b, len }] sorted, merged
+    const norm = (list) => list.slice().sort((x, y) => x.len - y.len || (x.a < y.a ? -1 : x.a > y.a ? 1 : 0)).reduce((out, r) => {
       const l = out[out.length - 1];
-      if (l && l.b.length === d.length && bi(d) === bi(l.b) + 1n) l.b = d; else out.push({ a: d, b: d });
+      if (l && l.len === r.len && r.a <= l.b + 1n) { if (r.b > l.b) l.b = r.b; } else out.push({ ...r });
       return out;
-    }, []).map((x) => (x.a === x.b ? x.a : `${x.a}-${x.b}`));
-    let sel = new Set(), big = false, curTrunk;
+    }, []);
+    const cut = (list, r) => list.flatMap((x) => {   // list minus run r
+      if (x.len !== r.len || r.b < x.a || r.a > x.b) return [x];
+      const out = [];
+      if (r.a > x.a) out.push({ a: x.a, b: r.a - 1n, len: x.len });
+      if (r.b < x.b) out.push({ a: r.b + 1n, b: x.b, len: x.len });
+      return out;
+    });
+    const overlap = (list, r) => list.filter((x) => x.len === r.len && x.a <= r.b && x.b >= r.a)
+      .map((x) => ({ a: x.a > r.a ? x.a : r.a, b: x.b < r.b ? x.b : r.b, len: r.len }));
+    const size = (list) => list.reduce((n, x) => n + (x.b - x.a + 1n), 0n);
+    const label = (x) => (x.a === x.b ? pad(x.a, x.len) : `${pad(x.a, x.len)}–${pad(x.b, x.len)}`);
+    const asRun = (r) => ({ a: bi(r.first_did), b: bi(r.last_did), len: r.first_did.length });
+    // "1240, 1245-1250" or From/To -> runs; returns { runs, bad }
+    const parse = (text) => {
+      const runs = [], bad = [];
+      for (const it of text.split(/[\s,;]+/).filter(Boolean)) {
+        const [x, y = x] = it.replace(/\+/g, '').split(/[-–]/);
+        if (!/^[0-9]{4,15}$/.test(x) || !/^[0-9]{4,15}$/.test(y) || x.length !== y.length || bi(x) > bi(y)) bad.push(it);
+        else runs.push({ a: bi(x), b: bi(y), len: x.length });
+      }
+      return { runs, bad };
+    };
     const drawDids = () => {
       const t = S.trunks.find((x) => x.id === +f.trunk_id.value);
       const ranges = t ? t.did_ranges || [] : [];
       if (!t) { pick.innerHTML = '<p class="hint">Pick a trunk to see its DIDs.</p>'; return; }
       if (!ranges.length) { pick.innerHTML = `<p class="hint">${esc(t.name)} has no DID ranges — add them on the SIP trunks page.</p>`; return; }
       const mine = (r) => p && r.process_id === p.id, other = (r) => r.process_id && !mine(r);
-      if (curTrunk !== t.id) { curTrunk = t.id; sel = new Set(ranges.filter(mine).flatMap(nums)); }
-      const total = ranges.reduce((s, r) => s + didCount(r), 0);
-      const freeN = ranges.filter((r) => !other(r)).reduce((s, r) => s + didCount(r), 0);
-      big = total > DID_GRID;
+      const free = norm(ranges.filter((r) => !other(r)).map(asRun));   // what this process may take
+      if (curTrunk !== t.id) { curTrunk = t.id; open = new Set(); sel = norm(ranges.filter(mine).map(asRun)); }
+      const freeN = size(free);
       const warn = t.allow_inbound === false ? `<p class="hint warn">Inbound calls are blocked on ${esc(t.name)} — assigned DIDs only take effect when you allow inbound on the trunk.</p>` : '';
-      if (big) {   // too many numbers for checkboxes: edit the runs as text
-        pick.innerHTML = warn + `<textarea id="didText" class="mono" rows="3" placeholder="e.g. 1240, 1245-1250"></textarea>
-          <p class="hint">Comma separated DIDs or runs (first-last). ${fmtInt(freeN)} of ${fmtInt(total)} DIDs on ${esc(t.name)} can be given to this process:
-          ${ranges.filter((r) => !other(r)).map((r) => `<span class="mono">${esc(didLabel(r))}</span>`).join(', ')}</p>`;
-        $('#didText', pick).value = ranges.filter(mine).map((r) => (r.first_did === r.last_did ? r.first_did : `${r.first_did}-${r.last_did}`)).join(', ');
-        return;
-      }
-      pick.innerHTML = warn + `<div class="did-tools"><b id="didSum"></b>
-          <input id="didType" class="mono" placeholder="Type DIDs: 1240, 1245-1250"><button type="button" class="btn sm" id="didTick">Tick</button>
-          <button type="button" class="btn sm" id="didAll">All free</button><button type="button" class="btn sm" id="didNone">Clear</button></div>
-        <p class="hint warn hidden" id="didErr"></p>` +
-        ranges.map((r) => other(r)
-          ? `<div class="did-grp taken"><small><span class="mono">${esc(didLabel(r))}</span> · ${fmtInt(didCount(r))} DID${didCount(r) === 1 ? '' : 's'} · assigned to <b>${esc(r.process_code)}</b></small></div>`
-          : `<div class="did-grp">${r.note ? `<small>${esc(r.note)}</small>` : ''}<div class="did-chips">${nums(r).map((d) =>
-              `<label class="dchip"><input type="checkbox" value="${d}" ${sel.has(d) ? 'checked' : ''}><span class="mono">${d}</span></label>`).join('')}</div></div>`).join('');
-      const boxes = $$('.dchip input', pick);
-      const sum = () => { $('#didSum', pick).textContent = `${sel.size} selected · ${fmtInt(freeN - sel.size)} free`; };
-      const setAll = (fn) => { boxes.forEach((b) => { b.checked = fn(b.value); b.checked ? sel.add(b.value) : sel.delete(b.value); }); sum(); };
-      boxes.forEach((b) => (b.onchange = () => { b.checked ? sel.add(b.value) : sel.delete(b.value); sum(); }));
-      $('#didAll', pick).onclick = () => setAll(() => true);
-      $('#didNone', pick).onclick = () => setAll(() => false);
-      const tick = () => {   // typed DIDs / runs -> tick them; unknown or taken ones are reported
-        const err = $('#didErr', pick), have = new Set(boxes.map((b) => b.value)), bad = [], want = new Set();
-        for (const it of $('#didType', pick).value.split(/[\s,;]+/).filter(Boolean)) {
-          const [a, b = a] = it.replace(/\+/g, '').split('-');
-          if (!/^[0-9]{4,15}$/.test(a) || !/^[0-9]{4,15}$/.test(b) || a.length !== b.length || bi(a) > bi(b) || bi(b) - bi(a) > 5000n) { bad.push(it); continue; }
-          for (let n = bi(a); n <= bi(b); n++) { const d = n.toString().padStart(a.length, '0'); have.has(d) ? want.add(d) : bad.push(d); }
-        }
-        want.forEach((d) => sel.add(d)); boxes.forEach((b) => { b.checked = sel.has(b.value); }); sum();
-        err.classList.toggle('hidden', !bad.length);
-        err.textContent = bad.length ? `Not free on ${t.name}: ${runs(bad.filter((x) => /^[0-9]+$/.test(x))).concat(bad.filter((x) => !/^[0-9]+$/.test(x))).slice(0, 20).join(', ')}` : '';
-        if (!bad.length) $('#didType', pick).value = '';
+      pick.innerHTML = warn + `
+        <div class="did-add">
+          <label>From DID<input id="didFrom" class="mono" placeholder="${esc(ranges.find((r) => !other(r))?.first_did || 'first DID')}"></label>
+          <label>To DID <small>blank = one DID</small><input id="didTo" class="mono" placeholder="last DID"></label>
+          <button type="button" class="btn sm primary" id="didAdd">Add</button><button type="button" class="btn sm" id="didRem">Remove</button>
+          <b id="didSum" class="did-sum"></b>
+        </div>
+        <p class="hint warn hidden" id="didErr"></p>
+        <div class="did-sel" id="didSel"></div>
+        <div class="did-ranges">${ranges.map((r, i) => {
+          const n = didCount(r);
+          if (other(r)) return `<div class="did-rg taken"><span class="mono">${esc(didLabel(r))}</span><small>${fmtInt(n)} DID${n === 1 ? '' : 's'} · assigned to <b>${esc(r.process_code)}</b></small></div>`;
+          return `<div class="did-rg" data-i="${i}">
+            <button type="button" class="tc-toggle" data-open="${i}" ${n > 1 && n <= CHIPS_MAX ? '' : 'disabled'} title="${n > CHIPS_MAX ? `more than ${CHIPS_MAX} numbers — use From / To` : 'pick single DIDs'}"><i>▸</i></button>
+            <span class="mono">${esc(didLabel(r))}</span><small>${fmtInt(n)} DID${n === 1 ? '' : 's'}${r.note ? ' · ' + esc(r.note) : ''} · <b data-cnt="${i}"></b></small>
+            <span class="did-rg-act"><button type="button" class="btn sm" data-all="${i}">All</button><button type="button" class="btn sm" data-none="${i}">None</button></span>
+            <div class="did-chips hidden" data-chips="${i}"></div></div>`;
+        }).join('')}</div>`;
+      const err = (m) => { const e = $('#didErr', pick); e.textContent = m || ''; e.classList.toggle('hidden', !m); };
+      const refresh = () => {
+        const n = size(sel);
+        $('#didSum', pick).textContent = `${fmtInt(Number(n))} selected · ${fmtInt(Number(freeN - n))} free`;
+        $('#didSel', pick).innerHTML = sel.length ? sel.map((x, k) => `<span class="dsel mono">${label(x)}${x.a !== x.b ? ` <small>${fmtInt(Number(x.b - x.a + 1n))}</small>` : ''}<button type="button" data-x="${k}" aria-label="remove">×</button></span>`).join('')
+          : '<span class="hint">No DIDs selected — inbound calls use the fallback (last process that used the DID / called the caller).</span>';
+        $$('#didSel [data-x]', pick).forEach((b) => (b.onclick = () => { sel = cut(sel, sel[+b.dataset.x]); refresh(); }));
+        ranges.forEach((r, i) => {
+          const el = $(`[data-cnt="${i}"]`, pick); if (!el) return;
+          const k = size(overlap(sel, asRun(r))), n = BigInt(didCount(r));
+          el.textContent = k === 0n ? 'none selected' : k === n ? 'all selected' : `${fmtInt(Number(k))} selected`;
+          el.className = k ? 'on' : '';
+          const box = $(`[data-chips="${i}"]`, pick);
+          if (box && open.has(i)) {
+            const rr = asRun(r);
+            if (!box.childElementCount) {
+              const out = []; for (let v = rr.a; v <= rr.b; v++) out.push(pad(v, rr.len));
+              box.innerHTML = out.map((d) => `<label class="dchip"><input type="checkbox" value="${d}"><span class="mono">${d}</span></label>`).join('');
+              $$('input', box).forEach((cb) => (cb.onchange = () => {
+                const one = { a: bi(cb.value), b: bi(cb.value), len: cb.value.length };
+                sel = cb.checked ? norm([...sel, one]) : cut(sel, one); refresh();
+              }));
+            }
+            $$('input', box).forEach((cb) => { cb.checked = overlap(sel, { a: bi(cb.value), b: bi(cb.value), len: cb.value.length }).length > 0; });
+          }
+        });
       };
-      $('#didTick', pick).onclick = tick;
-      $('#didType', pick).onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); tick(); } };
-      sum();
+      // add: only the parts that are free on this trunk; remove: anything
+      const apply = (adding) => {
+        const from = $('#didFrom', pick).value.trim(), to = $('#didTo', pick).value.trim();
+        if (!from) return err('Enter a DID in From (and optionally To).');
+        const { runs, bad } = parse(to ? `${from}-${to}` : from);
+        if (bad.length) return err(`Not a valid DID or range: ${bad.join(', ')} — From and To must have the same number of digits.`);
+        let outside = 0n;
+        for (const r of runs) {
+          if (adding) { const ok = overlap(free, r); outside += (r.b - r.a + 1n) - size(ok); sel = norm([...sel, ...ok]); }
+          else sel = cut(sel, r);
+        }
+        err(outside ? `${fmtInt(Number(outside))} number(s) skipped — not on ${t.name} or assigned to another process.` : '');
+        if (!outside) { $('#didFrom', pick).value = ''; $('#didTo', pick).value = ''; }
+        refresh();
+      };
+      $('#didAdd', pick).onclick = () => apply(true);
+      $('#didRem', pick).onclick = () => apply(false);
+      [$('#didFrom', pick), $('#didTo', pick)].forEach((x) => (x.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); apply(true); } }));
+      $$('[data-all]', pick).forEach((b) => (b.onclick = () => { sel = norm([...sel, asRun(ranges[+b.dataset.all])]); refresh(); }));
+      $$('[data-none]', pick).forEach((b) => (b.onclick = () => { sel = cut(sel, asRun(ranges[+b.dataset.none])); refresh(); }));
+      $$('[data-open]', pick).forEach((b) => (b.onclick = () => {
+        const i = +b.dataset.open, box = $(`[data-chips="${i}"]`, pick), on = !open.has(i);
+        on ? open.add(i) : open.delete(i);
+        box.classList.toggle('hidden', !on); b.closest('.did-rg').classList.toggle('open', on); refresh();
+      }));
+      refresh();
     };
     f.trunk_id.addEventListener('change', drawDids); drawDids();
     $('#sugCli', c).onclick = async () => { f.dummy_cli.value = (await api('GET', '/api/processes/suggest')).dummy_cli; };
@@ -681,8 +762,7 @@ async function procForm(p) {
         return [$('.d-allow', b).checked, $('.d-timed', b).checked ? { days: $$('.daypick input:checked', b).map((x) => x.value), from: $('.d-from', b).value, to: $('.d-to', b).value } : null]; };
       [d.allow_outbound, d.out_hours] = dir('out'); [d.allow_inbound, d.in_hours] = dir('in');
       if (!f.trunk_id.value) d.dids = [];
-      else if (big) d.dids = $('#didText', pick).value.split(/[\s,;]+/).filter(Boolean);
-      else if ($('.did-tools', pick)) d.dids = runs(sel);
+      else if ($('#didSel', pick)) d.dids = sel.map((x) => (x.a === x.b ? pad(x.a, x.len) : `${pad(x.a, x.len)}-${pad(x.b, x.len)}`));
       try {
         const r = await api(p ? 'PUT' : 'POST', p ? `/api/processes/${p.id}` : '/api/processes', d);
         S.trunks = await api('GET', '/api/trunks');   // DID owners changed
@@ -706,12 +786,18 @@ async function peerConfig(p, via) {
       <span>Calls</span><div class="dirs">${dirChip('OUT', p.allow_outbound !== false, p.out_hours)}${dirChip('IN', p.allow_inbound !== false, p.in_hours)}</div><span></span>
     </div>
     <div class="tabs"><button class="on" data-tab="pjsip">PJSIP</button><button data-tab="chan_sip">chan_sip / ViciDial</button></div>
-    <pre class="code" id="peerCode"></pre>
-    <div class="mfoot">${c.auth_type === 'password' ? '<button class="btn danger" id="regen">Regenerate password</button>' : ''}<button class="btn" id="copyCfg">Copy config</button><button class="btn primary" data-close>Done</button></div></div>`,
+    <div id="peerFiles"></div>
+    <div class="mfoot">${c.auth_type === 'password' ? '<button class="btn danger" id="regen">Regenerate password</button>' : ''}<button class="btn" id="copyCfg">Copy all</button><button class="btn primary" data-close>Done</button></div></div>`,
   (card) => {
     let tab = 'pjsip';
-    const show = () => { $('#peerCode').textContent = c[tab]; $$('.tabs button', card).forEach((b) => b.classList.toggle('on', b.dataset.tab === tab)); };
-    $$('.tabs button', card).forEach((b) => (b.onclick = () => { tab = b.dataset.tab; show(); })); show();
+    // one block per file (pjsip.conf / sip.conf + extensions.conf), each with its own Copy button
+    const show = () => {
+      const files = (c.files && c.files[tab]) || [{ name: '', text: c[tab] }];
+      $('#peerFiles').innerHTML = files.map((f, i) => `<div class="pfile"><div class="pfile-h"><b class="mono">${esc(f.name)}</b><button class="btn sm" data-file="${i}">Copy ${esc(f.name)}</button></div><pre class="code">${esc(f.text)}</pre></div>`).join('');
+      $$('#peerFiles [data-file]').forEach((b) => (b.onclick = () => copy(files[+b.dataset.file].text)));
+      $$('[data-tab]', card).forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
+    };
+    $$('[data-tab]', card).forEach((b) => (b.onclick = () => { tab = b.dataset.tab; show(); })); show();
     $$('[data-copy]', card).forEach((b) => (b.onclick = () => copy(b.dataset.copy)));
     $$('[data-via]', card).forEach((b) => (b.onclick = () => peerConfig(p, b.dataset.via)));
     $('#copyCfg', card).onclick = () => copy(c[tab]);
@@ -722,17 +808,31 @@ async function peerConfig(p, via) {
     };
   });
 }
-function copy(text) { navigator.clipboard.writeText(text).then(() => toast('Copied'), () => toast('Copy failed — select and copy manually', true)); }
+// navigator.clipboard exists only on HTTPS / localhost; the panel is usually opened as http://<ip>:3000, so fall back
+// to a hidden textarea + execCommand('copy'), which works on plain HTTP too
+function copy(text) {
+  const legacy = () => {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0';
+    ($('#modal:not(.hidden) .modal-card') || document.body).append(ta);
+    ta.select(); ta.setSelectionRange(0, text.length);
+    let ok = false; try { ok = document.execCommand('copy'); } catch { /* not allowed */ }
+    ta.remove();
+    ok ? toast('Copied') : toast('Copy failed — select the text and press Ctrl+C', true);
+  };
+  if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(() => toast('Copied'), legacy);
+  else legacy();
+}
 
 // =================================================================== CDR
 PAGES.cdr = async (main) => {
-  const [procs, trunks] = await Promise.all([api('GET', '/api/processes'), api('GET', '/api/trunks')]);
+  const [procs, trunks] = isViewer() ? [S.me.processes, []] : await Promise.all([api('GET', '/api/processes'), api('GET', '/api/trunks')]);
   main.innerHTML = `<div class="head"><div><h1>CDR report</h1><p>Every call with its disposition. Times in ${esc(S.tz)}.</p></div></div>
     <div class="panel"><form class="filters" id="cf">
       <label>From<input type="date" name="from" value="${dayStr()}"></label>
       <label>To<input type="date" name="to" value="${dayStr()}"></label>
-      <label>Process<select name="process"><option value="">All</option>${procs.map((p) => `<option value="${esc(p.code)}">${esc(p.code)}</option>`).join('')}</select></label>
-      <label>Trunk<select name="trunk"><option value="">All</option>${trunks.map((t) => `<option>${esc(t.name)}</option>`).join('')}</select></label>
+      <label>Process<select name="process"><option value="">All${isViewer() ? ' my processes' : ''}</option>${procs.map((p) => `<option value="${esc(p.code)}">${esc(p.code)}</option>`).join('')}</select></label>
+      <label class="${isViewer() ? 'hidden' : ''}">Trunk<select name="trunk"><option value="">All</option>${trunks.map((t) => `<option>${esc(t.name)}</option>`).join('')}</select></label>
       <label>Disposition<select name="disposition"><option value="">All</option>${S.dispositions.map((d) => `<option value="${d.code}">${esc(dispName(d.code))}</option>`).join('')}</select></label>
       <label>Direction<select name="direction"><option value="">All</option><option value="out">Outbound</option><option value="in">Inbound DID</option></select></label>
       <label>Number<input name="number" placeholder="contains…" class="mono"></label>
@@ -774,7 +874,7 @@ PAGES.stats = async (main) => {
     <div class="panel" style="margin-bottom:14px"><form class="filters" id="sf" style="border-bottom:0">
       <label>From<input type="date" name="from" value="${daysAgo(6)}"></label>
       <label>To<input type="date" name="to" value="${dayStr()}"></label>
-      <label>Group by<select name="scope"><option value="process">Process</option><option value="trunk">Trunk</option><option value="did">DID</option></select></label>
+      <label>Group by<select name="scope"><option value="process">Process</option>${isViewer() ? '' : '<option value="trunk">Trunk</option><option value="did">DID</option>'}</select></label>
       <label>Only<select name="ref"><option value="">All</option></select></label>
       <div class="actions"><button class="btn primary">Show</button></div></form></div>
     <div class="panel" style="margin-bottom:14px"><h2>Usage over time <span class="uctl">
@@ -787,7 +887,7 @@ PAGES.stats = async (main) => {
   const fillRefs = async () => {
     const list = f.scope.value === 'trunk' ? (await api('GET', '/api/trunks')).map((t) => t.name)
       : f.scope.value === 'did' ? []   // can be thousands: show all DIDs with calls
-      : (await api('GET', '/api/processes')).map((p) => p.code);
+      : isViewer() ? S.me.processes.map((p) => p.code) : (await api('GET', '/api/processes')).map((p) => p.code);
     f.ref.innerHTML = '<option value="">All</option>' + list.map((x) => `<option>${esc(x)}</option>`).join('');
   };
   const rej = (r) => r.channel_limit + r.trunk_limit + r.blocked + r.no_route + r.invalid + (r.off_hours || 0) + (r.no_header || 0) + (r.invalid_did || 0);
@@ -1056,7 +1156,7 @@ const epName = (ep) => { const ip = String(ep).replace(/:\d+$/, ''); return Diag
 function diagPoll(fn, ms) {
   clearInterval(Diag.timer);
   const tab = Diag.tab;
-  Diag.timer = setInterval(() => { if (S.page !== 'diag' || Diag.tab !== tab || document.hidden) return; fn().catch(() => {}); }, ms);
+  Diag.timer = setInterval(() => { if (S.page !== 'diag' || Diag.tab !== tab || document.hidden) return; bg(fn).catch(() => {}); }, ms);
 }
 
 PAGES.diag = async (main) => {
@@ -1596,9 +1696,195 @@ PAGES.alerts = async (main) => {
   try { draw(await api('GET', '/api/diag/alerts')); } catch (e) { $('#alStatus').textContent = e.message; }
 };
 
+// =================================================================== USERS
+const TAB_LABEL = { live: 'Live dashboard', cdr: 'CDR report', stats: 'Daily statistics' };
+const ROLE_CHIP = { superadmin: '<span class="chip ok">Super admin</span>', admin: '<span class="chip info">Admin</span>', viewer: '<span class="chip">Monitor</span>' };
+const ROLE_NAME = { superadmin: 'super admin', admin: 'admin', viewer: 'monitor' };
+const uaShort = (ua) => {
+  ua = ua || '';
+  const b = /Edg\//.test(ua) ? 'Edge' : /OPR\//.test(ua) ? 'Opera' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : /curl/i.test(ua) ? 'curl' : ua ? 'Other' : '—';
+  const o = /Windows/.test(ua) ? 'Windows' : /Android/.test(ua) ? 'Android' : /iPhone|iPad/.test(ua) ? 'iOS' : /Mac OS X/.test(ua) ? 'macOS' : /Linux/.test(ua) ? 'Linux' : '';
+  return o ? `${b} · ${o}` : b;
+};
+PAGES.users = async (main) => {
+  main.innerHTML = `<div class="head"><div><h1>Users</h1><p><b>Super admins</b> have full access including the Activity log. <b>Admins</b> have full access except the Activity log and cannot change super admins. <b>Monitor</b> users (e.g. team leaders) are read-only and see only the processes and tabs you pick. The server enforces this, not just the menu.</p></div>
+      <div class="actions"><button class="btn primary" id="uAdd">+ Add user</button></div></div>
+    <div class="panel" style="margin-bottom:14px"><div class="tw"><table><thead><tr><th>User</th><th>Role</th><th>Processes</th><th>Tabs</th><th>Status</th><th>Last sign-in</th><th class="r">Sessions</th><th></th></tr></thead><tbody id="uBody"><tr><td colspan="8" class="empty">Loading…</td></tr></tbody></table></div></div>
+    <div class="panel"><h2>Sessions <span style="display:flex;gap:8px;align-items:center"><label class="check" style="font-size:12.5px"><input type="checkbox" id="sAll"> show ended</label>
+      <button class="btn sm" id="sEndAll">Sign out all other sessions</button></span></h2>
+      <div class="body" style="padding-bottom:6px"><p class="hint" id="sNote"></p></div>
+      <div class="tw" style="max-height:460px;overflow:auto"><table><thead><tr><th>User</th><th>IP</th><th>Browser</th><th>Signed in</th><th>Last activity</th><th>Expires / ended</th><th></th></tr></thead><tbody id="sBody"></tbody></table></div></div>`;
+  let data = null;
+
+  const loadUsers = async () => {
+    data = await api('GET', '/api/users');
+    const pname = Object.fromEntries(data.processes.map((p) => [p.code, p.name]));
+    // a plain admin sees super admins read-only (the server refuses changes too)
+    const may = (u) => data.super || u.role !== 'superadmin';
+    $('#uBody').innerHTML = data.users.map((u) => `<tr>
+      <td class="t-name"><b>${esc(u.username)}${u.username === data.me ? ' <span class="chip">you</span>' : ''}</b><small>${esc(u.full_name)}</small></td>
+      <td>${ROLE_CHIP[u.role] || esc(u.role)}</td>
+      <td style="font-size:12.5px">${u.role !== 'viewer' ? '<span class="hint">all</span>' : u.processes.map((c) => `<span class="chip" title="${esc(pname[c] || 'deleted process')}">${esc(c)}</span>`).join(' ') || '—'}</td>
+      <td style="font-size:12.5px">${u.role !== 'viewer' ? '<span class="hint">all</span>' : u.tabs.map((t) => esc(TAB_LABEL[t] || t)).join(', ')}</td>
+      <td>${u.active ? '<span class="chip ok">active</span>' : '<span class="chip bad">disabled</span>'}</td>
+      <td class="mono" style="font-size:12px;white-space:nowrap">${u.last_login ? fmtTime(u.last_login) : '—'}</td>
+      <td class="r num">${u.sessions}</td>
+      <td class="r" style="white-space:nowrap">${!may(u) ? '<span class="hint">super admin only</span>' : `<button class="btn sm" data-edit="${u.id}">Edit</button> <button class="btn sm" data-pw="${u.id}">Password</button>
+        ${u.sessions && u.username !== data.me ? `<button class="btn sm" data-out="${esc(u.username)}" title="End all sessions of this user">Sign out</button>` : ''}
+        ${u.username !== data.me ? `<button class="btn sm danger" data-del="${u.id}">Delete</button>` : ''}`}</td></tr>`).join('');
+    const byId = (id) => data.users.find((u) => u.id === +id);
+    $$('#uBody [data-edit]').forEach((b) => (b.onclick = () => userForm(byId(b.dataset.edit))));
+    $$('#uBody [data-pw]').forEach((b) => (b.onclick = () => pwForm(byId(b.dataset.pw))));
+    $$('#uBody [data-out]').forEach((b) => (b.onclick = async () => {
+      if (!(await confirmBox('Sign out user', `End every session of <b>${esc(b.dataset.out)}</b>? They must sign in again.`, 'Sign out'))) return;
+      try { const r = await api('POST', '/api/users/sessions/end', { user: b.dataset.out }); toast(`${r.ended} session(s) ended`); refresh(); } catch (e) { toast(e.message, true); }
+    }));
+    $$('#uBody [data-del]').forEach((b) => (b.onclick = async () => {
+      const u = byId(b.dataset.del);
+      if (!(await confirmBox('Delete user', `Delete <b>${esc(u.username)}</b>? Their sessions end at once.`))) return;
+      try { await api('DELETE', `/api/users/${u.id}`); toast('User deleted'); refresh(); } catch (e) { toast(e.message, true); }
+    }));
+  };
+
+  const loadSessions = async () => {
+    const r = await api('GET', '/api/users/sessions' + ($('#sAll').checked ? '?all=1' : ''));
+    $('#sNote').textContent = `A session lasts ${r.ttlHours} h from sign-in. Signing a session out also closes its live feed at once. Disabling a user, changing their role or password signs them out everywhere.`;
+    $('#sBody').innerHTML = r.sessions.length ? r.sessions.map((x) => `<tr style="${x.open ? '' : 'opacity:.55'}">
+      <td class="t-name"><b>${esc(x.username)}${x.current ? ' <span class="chip ok">this session</span>' : ''}</b><small>${x.role ? ROLE_NAME[x.role] || esc(x.role) : 'deleted user'}${x.full_name ? ' · ' + esc(x.full_name) : ''}</small></td>
+      <td class="mono" style="font-size:12.5px">${esc(x.ip || '')}</td><td style="font-size:12.5px" title="${esc(x.user_agent || '')}">${esc(uaShort(x.user_agent))}</td>
+      <td class="mono" style="font-size:12px;white-space:nowrap">${fmtTime(x.created_at)}</td>
+      <td class="mono" style="font-size:12px;white-space:nowrap" title="${fmtTime(x.last_seen)}">${ago(new Date(x.last_seen))} ago</td>
+      <td class="mono" style="font-size:12px;white-space:nowrap">${x.open ? fmtTime(x.expires_at) : x.revoked_at ? `ended ${fmtTime(x.revoked_at)}${x.revoked_by && x.revoked_by !== x.username ? ` by ${esc(x.revoked_by)}` : ''}` : 'expired'}</td>
+      <td class="r">${x.open && !x.current && (isSuper() || x.role !== 'superadmin') ? `<button class="btn sm" data-end="${x.id}">Sign out</button>` : ''}</td></tr>`).join('')
+      : '<tr><td colspan="7" class="empty">No sessions.</td></tr>';
+    $$('#sBody [data-end]').forEach((b) => (b.onclick = async () => {
+      b.disabled = true;
+      try { await api('DELETE', `/api/users/sessions/${b.dataset.end}`); toast('Session signed out'); refresh(); } catch (e) { toast(e.message, true); b.disabled = false; }
+    }));
+  };
+  const refresh = () => Promise.all([loadUsers(), loadSessions()]).catch((e) => toast(e.message, true));
+
+  const userForm = (u) => {
+    const v = u || { role: 'viewer', processes: [], tabs: ['live', 'cdr', 'stats'], active: true };
+    openModal(u ? `Edit user ${u.username}` : 'Add user', `<form id="uf"><div class="fgrid" style="padding:16px 18px 0">
+      ${u ? '' : `<label>Username<input name="username" required pattern="[a-zA-Z0-9._\\-]{3,64}" autocomplete="off" placeholder="e.g. tl_ravi"></label>`}
+      <label>Full name <small>optional</small><input name="full_name" value="${esc(v.full_name || '')}" maxlength="100"></label>
+      ${u ? '' : `<label class="full">Password <small>at least 8 characters</small><div class="row"><input name="password" required minlength="8" autocomplete="new-password" class="mono"><button type="button" class="btn" id="uGen">Generate</button></div></label>`}
+      <label class="full">Role<select name="role" ${u && u.username === data.me ? 'disabled title="You cannot change your own role"' : ''}><option value="viewer" ${v.role === 'viewer' ? 'selected' : ''}>Monitor (team leader): read-only, chosen processes and tabs</option>
+        <option value="admin" ${v.role === 'admin' ? 'selected' : ''}>Admin: full access except the Activity log</option>
+        ${data.super ? `<option value="superadmin" ${v.role === 'superadmin' ? 'selected' : ''}>Super admin: full access and the Activity log</option>` : ''}</select></label>
+      <div class="full vOnly"><div class="lab" style="font-size:12.5px;font-weight:500;color:var(--ink-2);margin-bottom:6px">Tabs this user can open</div>
+        <div style="display:flex;gap:16px;flex-wrap:wrap">${data.tabs.map((t) => `<label class="check"><input type="checkbox" name="tab" value="${t}" ${v.tabs.includes(t) ? 'checked' : ''}> ${TAB_LABEL[t] || t}</label>`).join('')}</div></div>
+      <div class="full vOnly"><div class="lab" style="font-size:12.5px;font-weight:500;color:var(--ink-2);margin-bottom:6px;display:flex;justify-content:space-between">Processes this user can see
+        <span><button type="button" class="link" id="pAll">all</button> · <button type="button" class="link" id="pNone">none</button></span></div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:6px 14px;max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:10px">
+        ${data.processes.length ? data.processes.map((p) => `<label class="check"><input type="checkbox" name="proc" value="${esc(p.code)}" ${v.processes.includes(p.code) ? 'checked' : ''}> <b>${esc(p.code)}</b> <small>${esc(p.name)}${p.active ? '' : ' · inactive'}</small></label>`).join('') : '<span class="hint">No processes yet.</span>'}</div>
+        <p class="hint" style="margin-top:6px">Live counters, finished-call feed, CDR, CSV export and statistics are limited to these processes. Trunks, other processes and all settings stay hidden.</p></div>
+      ${u ? `<label class="check full"><input type="checkbox" name="active" ${v.active ? 'checked' : ''}> Active (unticking signs the user out and blocks sign-in)</label>` : ''}
+      </div><p class="err" id="uErr" style="padding:0 18px"></p>
+      <div class="mfoot" style="padding:0 18px 16px"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary">${u ? 'Save' : 'Add user'}</button></div></form>`, (c) => {
+      const f = $('#uf', c);
+      const sync = () => $$('.vOnly', c).forEach((x) => x.classList.toggle('hidden', f.role.value !== 'viewer'));
+      f.role.onchange = sync; sync();
+      const gen = () => { const a = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789', r = crypto.getRandomValues(new Uint32Array(12)); return [...r].map((x) => a[x % a.length]).join(''); };
+      if ($('#uGen', c)) $('#uGen', c).onclick = () => { f.password.value = gen(); };
+      $('#pAll', c).onclick = () => $$('input[name=proc]', c).forEach((x) => (x.checked = true));
+      $('#pNone', c).onclick = () => $$('input[name=proc]', c).forEach((x) => (x.checked = false));
+      f.onsubmit = async (e) => {
+        e.preventDefault();
+        const b = { full_name: f.full_name.value.trim(), role: f.role.value,
+          processes: $$('input[name=proc]:checked', c).map((x) => x.value), tabs: $$('input[name=tab]:checked', c).map((x) => x.value) };
+        if (!u) { b.username = f.username.value.trim(); b.password = f.password.value; } else b.active = f.active.checked;
+        try {
+          if (u) await api('PUT', `/api/users/${u.id}`, b); else await api('POST', '/api/users', b);
+          closeModal();
+          toast(u ? 'User saved' : `User ${b.username} added${b.role === 'viewer' ? ' — share the username and password with them' : ''}`);
+          refresh();
+        } catch (er) { $('#uErr', c).textContent = er.message; }
+      };
+    });
+  };
+
+  const pwForm = (u) => openModal(`New password · ${u.username}`, `<form class="mbody" id="upf" style="display:flex;flex-direction:column;gap:10px">
+      <label>New password <small>at least 8 characters</small><input name="password" required minlength="8" autocomplete="new-password" class="mono"></label>
+      <p class="hint">${u.username === data.me ? 'Your other sessions are signed out.' : `All sessions of ${esc(u.username)} are signed out.`}</p>
+      <p class="err" id="upErr"></p><div class="mfoot"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary">Set password</button></div></form>`, (c) => {
+    $('#upf', c).onsubmit = async (e) => {
+      e.preventDefault();
+      try { const r = await api('POST', `/api/users/${u.id}/password`, formData(e.target)); closeModal(); toast(`Password set · ${r.sessionsEnded} session(s) signed out`); refresh(); }
+      catch (er) { $('#upErr', c).textContent = er.message; }
+    };
+  });
+
+  $('#uAdd').onclick = () => userForm(null);
+  $('#sAll').onchange = () => loadSessions().catch((e) => toast(e.message, true));
+  $('#sEndAll').onclick = async () => {
+    if (!(await confirmBox('Sign out everyone else', 'End every session except this one? All other users must sign in again.', 'Sign out all'))) return;
+    try { const r = await api('POST', '/api/users/sessions/end', {}); toast(`${r.ended} session(s) ended`); refresh(); } catch (e) { toast(e.message, true); }
+  };
+  await refresh();
+};
+
+// =================================================================== ACTIVITY (super admins)
+// Requests: every action of every user (activity_log). Changes: what was saved, with the values (audit_log).
+const ACT_STATUS = (n) => (n >= 500 ? 'bad' : n >= 400 ? 'warn' : 'ok');
+PAGES.activity = async (main) => {
+  main.innerHTML = `<div class="head"><div><h1>Activity log</h1><p>What every user did: pages opened, searches, exports, changes, sign-ins and failed sign-ins. Only super admins see this page. Times in ${esc(S.tz)}. Old entries are removed by the retention job.</p></div></div>
+    <div class="tabs big" id="aTabs"><button data-t="req" class="on">Activity</button><button data-t="chg">Changes (saved values)</button></div>
+    <div class="panel"><form class="filters" id="af">
+      <label>From<input type="date" name="from" value="${dayStr()}"></label>
+      <label>To<input type="date" name="to" value="${dayStr()}"></label>
+      <label>User<select name="user"><option value="">All users</option></select></label>
+      <label>Search<input name="q" placeholder="action, page, IP…"></label>
+      <label class="check reqOnly" style="align-self:center"><input type="checkbox" name="writes" value="1"> changes only</label>
+      <label class="check reqOnly" style="align-self:center"><input type="checkbox" name="failed" value="1"> errors / denied only</label>
+      <div class="actions"><button class="btn primary">Search</button></div>
+    </form><div class="summary" id="aSum"></div>
+    <div class="tw"><table><thead id="aHead"></thead><tbody id="aBody"></tbody></table></div>
+    <div class="pager" id="aPager"></div></div>`;
+  const f = $('#af'); let page = 1, tab = 'req', usersLoaded = false;
+  const qs = () => { const d = formData(f); if (!f.writes.checked) delete d.writes; if (!f.failed.checked) delete d.failed; return new URLSearchParams({ ...d, page }).toString(); };
+  const td = (v, st = '') => `<td style="${st}">${v}</td>`;
+  const when = (r) => `<td class="mono" style="font-size:12px;white-space:nowrap" title="${fmtTime(r.at)}">${fmtShort(r.at)}</td>`;
+  const load = async () => {
+    $$('#aTabs button').forEach((b) => b.classList.toggle('on', b.dataset.t === tab));
+    $$('.reqOnly', f).forEach((x) => x.classList.toggle('hidden', tab !== 'req'));
+    const cols = tab === 'req' ? 7 : 5;
+    $('#aHead').innerHTML = tab === 'req'
+      ? '<tr><th>When</th><th>User</th><th>Action</th><th>Request</th><th>Result</th><th class="r">Time</th><th>IP</th></tr>'
+      : '<tr><th>When</th><th>User</th><th>Change</th><th>Object</th><th>Values</th></tr>';
+    $('#aBody').innerHTML = `<tr><td colspan="${cols}" class="empty">Loading…</td></tr>`;
+    try {
+      const r = await api('GET', `/api/activity${tab === 'chg' ? '/changes' : ''}?` + qs());
+      if (r.users && !usersLoaded) {
+        usersLoaded = true;
+        f.user.insertAdjacentHTML('beforeend', r.users.map((u) => `<option>${esc(u)}</option>`).join(''));
+      }
+      $('#aSum').innerHTML = `<span class="chip">${fmtInt(r.total)} entries</span><span class="chip">${esc(r.from)}${r.from !== r.to ? ' → ' + esc(r.to) : ''}</span>`;
+      $('#aBody').innerHTML = !r.rows.length ? `<tr><td colspan="${cols}" class="empty">Nothing for this filter.</td></tr>`
+        : tab === 'req' ? r.rows.map((x) => `<tr>${when(x)}
+            <td class="t-name"><b>${esc(x.username || '?')}</b><small>${esc(ROLE_NAME[x.role] || x.role || '')}</small></td>
+            ${td(esc(x.action || '—'))}
+            <td class="mono" style="font-size:12px;max-width:420px;overflow-wrap:anywhere"><b>${esc(x.method)}</b> ${esc(x.path)}${x.query ? `<span style="color:var(--ink-3)">?${esc(x.query)}</span>` : ''}</td>
+            <td>${x.status ? `<span class="chip ${ACT_STATUS(x.status)}">${x.status}</span>` : ''}</td>
+            <td class="r num" style="font-size:12px">${x.ms != null ? x.ms + ' ms' : ''}</td>
+            <td class="mono" style="font-size:12px">${esc(x.ip || '')}</td></tr>`).join('')
+        : r.rows.map((x) => `<tr>${when(x)}${td(`<b>${esc(x.admin || '?')}</b>`)}${td(esc(x.action))}
+            <td class="mono" style="font-size:12px">${esc(x.entity || '')}${x.entity_id ? ' #' + esc(x.entity_id) : ''}</td>
+            <td class="mono" style="font-size:12px;max-width:520px;overflow-wrap:anywhere">${x.details ? esc(Object.entries(x.details).map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`).join('  ')) : ''}</td></tr>`).join('');
+      const pages = Math.max(1, Math.ceil(r.total / r.size));
+      $('#aPager').innerHTML = `Page ${page} of ${pages} <button class="btn sm" id="apv" ${page <= 1 ? 'disabled' : ''}>‹ Prev</button><button class="btn sm" id="anx" ${page >= pages ? 'disabled' : ''}>Next ›</button>`;
+      $('#apv').onclick = () => { page--; load(); }; $('#anx').onclick = () => { page++; load(); };
+    } catch (e) { $('#aBody').innerHTML = `<tr><td colspan="${cols}" class="empty">${esc(e.message)}</td></tr>`; }
+  };
+  $$('#aTabs button').forEach((b) => (b.onclick = () => { tab = b.dataset.t; page = 1; load(); }));
+  f.addEventListener('submit', (e) => { e.preventDefault(); page = 1; load(); });
+  load();
+};
+
 // =================================================================== SYSTEM
 PAGES.system = async (main) => {
-  main.innerHTML = `<div class="head"><div><h1>System</h1><p>Server resources, health, generated Asterisk config, Asterisk views and audit log. Live Asterisk CLI log: <a href="#/diag?tab=log">Diagnostics → Asterisk log</a>.</p></div>
+  main.innerHTML = `<div class="head"><div><h1>System</h1><p>Server resources, health, generated Asterisk config and Asterisk views. Live Asterisk CLI log: <a href="#/diag?tab=log">Diagnostics → Asterisk log</a>.</p></div>
     <div class="actions"><button class="btn" id="reapply">Re-apply config to Asterisk</button></div></div>
     <div class="panel" style="margin-bottom:14px"><h2>Server resources <small id="resInfo" style="font-weight:400;color:var(--ink-3);font-size:12.5px"></small></h2><div class="body"><div class="grid kpis" id="res" style="margin-bottom:0">Loading…</div></div></div>
     <div class="panel" style="margin-bottom:14px"><h2>Health</h2><div class="body"><div class="health" id="health">Loading…</div></div></div>
@@ -1615,7 +1901,6 @@ PAGES.system = async (main) => {
         ${['endpoints', 'registrations', 'contacts', 'groups', 'channels', 'channelstats', 'transports', 'qualify', 'rtp'].map((x, i) => `<button data-cli="${x}" class="${i ? '' : 'on'}">${x}</button>`).join('')}</div><pre class="code" id="cliOut">…</pre></div></div>
     </div>
     <div class="grid two">
-      <div class="panel"><h2>Audit log</h2><div class="tw" style="max-height:380px;overflow:auto"><table><thead><tr><th>When</th><th>Admin</th><th>Action</th><th>Object</th></tr></thead><tbody id="audit"></tbody></table></div></div>
       <div class="panel"><h2>Change password</h2><form class="body" id="pwf" style="display:flex;flex-direction:column;gap:10px;max-width:360px">
         <label>Current password<input type="password" name="current" required autocomplete="current-password"></label>
         <label>New password<input type="password" name="next" required minlength="8" autocomplete="new-password"></label>
@@ -1647,7 +1932,7 @@ PAGES.system = async (main) => {
   // graph icon on a tile -> that resource's history (sys_metrics, one sample per minute, kept 5 days)
   $('#res').onclick = (e) => { const b = e.target.closest('[data-graph]'); if (b) resourceGraph(b.dataset.graph, b.dataset.title); };
   clearInterval(S.resTimer);   // every 5 s while the System page is open
-  S.resTimer = setInterval(() => { if (S.page !== 'system') clearInterval(S.resTimer); else if (!document.hidden) resources().catch(() => {}); }, 5000);
+  S.resTimer = setInterval(() => { if (S.page !== 'system') clearInterval(S.resTimer); else if (!document.hidden) bg(resources).catch(() => {}); }, 5000);
   const cfg = async () => {
     const files = await api('GET', '/api/system/config-preview');
     const names = Object.keys(files); let cur = names[0];
@@ -1660,22 +1945,17 @@ PAGES.system = async (main) => {
     $('#cliOut').textContent = 'running…';
     try { $('#cliOut').textContent = (await api('GET', `/api/system/cli/${what}`)).output || '(empty)'; } catch (e) { $('#cliOut').textContent = e.message; }
   };
-  const audit = async () => {
-    const rows = await api('GET', '/api/system/audit?limit=150');
-    $('#audit').innerHTML = rows.length ? rows.map((r) => `<tr><td class="mono" style="font-size:12px;white-space:nowrap">${fmtTime(r.at)}</td><td>${esc(r.admin || '')}</td><td>${esc(r.action)}</td>
-      <td class="mono" style="font-size:12px">${esc(r.entity || '')} ${esc(r.details ? Object.values(r.details).join(' ') : '')}</td></tr>`).join('') : `<tr><td colspan="4" class="empty">Nothing yet</td></tr>`;
-  };
   $$('#cliTabs button').forEach((b) => (b.onclick = () => cli(b.dataset.cli)));
   $('#reapply').onclick = async () => {
     const r = await api('POST', '/api/system/apply');
     r.ok ? toast(`Applied · reloaded ${r.reloaded.join(', ') || 'nothing (reload disabled)'}`) : toast('Apply failed: ' + r.error, true);
-    health(); cfg(); audit();
+    health(); cfg();
   };
   $('#pwf').addEventListener('submit', async (e) => {
     e.preventDefault(); $('#pwErr').textContent = '';
-    try { await api('POST', '/api/system/password', formData(e.target)); e.target.reset(); toast('Password changed'); } catch (er) { $('#pwErr').textContent = er.message; }
+    try { const r = await api('POST', '/api/me/password', formData(e.target)); e.target.reset(); toast(`Password changed${r.otherSessionsEnded ? ` · ${r.otherSessionsEnded} other session(s) signed out` : ''}`); } catch (er) { $('#pwErr').textContent = er.message; }
   });
-  resources().catch((e) => ($('#res').textContent = e.message)); health().catch(() => {}); cfg().catch((e) => ($('#cfgCode').textContent = e.message)); cli('endpoints'); audit().catch(() => {});
+  resources().catch((e) => ($('#res').textContent = e.message)); health().catch(() => {}); cfg().catch((e) => ($('#cfgCode').textContent = e.message)); cli('endpoints');
 };
 
 boot();
