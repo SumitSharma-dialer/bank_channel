@@ -154,6 +154,7 @@ Login is rate-limited to 10 failures per IP per 15 minutes.
 | `GET /api/reports/calls?from&to&process&trunk&disposition&direction&did&number&page&size` | call list + totals |
 | `GET /api/reports/calls.csv?…` | CSV export (streamed) |
 | `GET /api/reports/daily?from&to&scope=process|trunk|did&ref` | daily stats |
+| `GET /api/reports/usage?from&to&scope=process|trunk|did&ref&step=0|5|15|60|1440` | usage over time: peak channels, calls, answered per interval (top 7 + Other) |
 | `GET /api/reports/dispositions` | disposition list |
 | `GET /api/system/health` | Asterisk version, ARI, DB, Redis, last apply result |
 | `GET /api/system/resources` | CPU % (two `/proc/stat` samples 0.4 s apart; idle + iowait = idle), load average, cores, Asterisk's share of all CPU; RAM used / total / available (`MemAvailable`) and swap; storage per real disk mount (ext4/xfs/…, no tmpfs/snap) used / total / free. Feeds the **Server resources** tiles on the System page (refreshed every 5 s; meter amber ≥ 80 %, red ≥ 95 %). The small graph icon on each tile opens that resource's history (`GET /api/system/resources/history?hours=6|24|72|120`, from `sys_metrics`). Code `src/sysinfo.js` |

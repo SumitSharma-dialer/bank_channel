@@ -52,7 +52,7 @@ The running entry point is `src/server.js` (CommonJS). Files used by it:
 | `src/asterisk/apply.js` | Writes the 3 files atomically, reloads `res_pjsip.so`, `res_pjsip_outbound_registration.so`, `pbx_config.so` via ARI |
 | `src/routes/trunks.js` | `/api/trunks` CRUD + DID ranges |
 | `src/routes/processes.js` | `/api/processes` CRUD, DID assignment, limits, peer config |
-| `src/routes/reports.js` | `/api/reports` calls list, CSV export, daily stats |
+| `src/routes/reports.js` | `/api/reports` calls list, CSV export, daily stats, usage over time |
 | `src/routes/system.js` | `/api/system` health, re-apply, config preview, read-only Asterisk CLI, audit log, password change |
 | `src/routes/internal.js` | `/internal/did-route` — localhost only, called by the dialplan |
 | `src/routes/util.js` | Validation helpers |
