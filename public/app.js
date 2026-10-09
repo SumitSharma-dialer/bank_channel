@@ -752,7 +752,7 @@ PAGES.cdr = async (main) => {
       $('#cBody').innerHTML = r.rows.length ? r.rows.map((c) => `<tr>
         <td class="mono" style="font-size:12.5px;white-space:nowrap">${fmtTime(c.start_time)}</td><td>${esc(c.process_code || '')}</td><td>${esc(c.trunk_name || '')}</td>
         <td class="mono">${c.direction === 'in' ? '<span class="chip info" title="inbound call to a DID">in</span> ' : ''}${esc(c.dialed || '')}</td><td class="mono" style="color:var(--ink-2)">${esc(c.sent_number || '')}</td>
-        <td class="mono" style="font-size:12.5px">${esc(c.cli_out || c.cli_in || '')}</td>
+        <td class="mono" style="font-size:12.5px"${c.cli_out ? ` title="sent to carrier as ${esc(c.cli_out)}"` : ''}>${esc(c.cli_in || '')}</td>
         <td class="mono" style="font-size:12.5px">${esc(c.did || '')}${c.hdr_status && c.hdr_status !== 'none' ? ` <span class="chip ${c.hdr_status === 'ok' ? 'ok' : 'bad'}" title="header dialing call">hdr ${esc(HDR_TXT[c.hdr_status] || c.hdr_status)}</span>` : ''}</td><td>${dispChip(c.disposition)}</td>
         <td class="r num">${c.ring_sec}s</td><td class="r num">${fmtDur(c.bill_sec)}</td><td class="r num" title="Q.850 hangup cause">${c.hangup_cause || ''}</td></tr>`).join('')
         : `<tr><td colspan="11" class="empty">No calls for this filter.</td></tr>`;
