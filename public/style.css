@@ -7,6 +7,8 @@
   --mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
   --sans: 'IBM Plex Sans', system-ui, sans-serif;
   --r: 10px;
+  /* chart series (validated categorical order; Other = --ink-3) */
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300; --s7: #4a3aa7;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -16,6 +18,7 @@
     --accent: #37d39a; --accent-ink: #062016; --accent-soft: #0f2c22;
     --warn: #f0b13d; --warn-soft: #2e2410; --bad: #ff6b5e; --bad-soft: #351714; --info: #6aa5ff; --info-soft: #14243d;
     --side: #080a0c; --side-hi: #141a1f;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: #9085e9;
     color-scheme: dark;
   }
 }
@@ -339,3 +342,10 @@ details.setup pre { margin-top: 8px; white-space: pre-wrap; }
 .rh-btn { float: right; border: 1px solid var(--line); background: var(--panel-2); color: var(--ink-3); border-radius: 6px;
   width: 24px; height: 22px; margin: -3px -4px 0 6px; padding: 0; display: grid; place-items: center; cursor: pointer; }
 .rh-btn:hover, .rh-btn:focus-visible { color: var(--accent); border-color: var(--accent); }
+
+/* ---------- usage over time (Daily statistics) */
+.uctl { display: flex; gap: 6px; text-transform: none; letter-spacing: 0; font-weight: 400; }
+.uctl select { font: 12px var(--sans); padding: 2px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); color: var(--ink-2); }
+.u-legend { padding: 0 0 8px; }
+.u-tip { top: 4px; line-height: 1.5; }
+@media (max-width: 640px) { .panel > h2:has(.uctl) { flex-wrap: wrap; gap: 6px; } }

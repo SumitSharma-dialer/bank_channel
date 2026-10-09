@@ -81,6 +81,38 @@ router.get('/daily', wrap(async (req, res) => {
   res.json({ from, to, scope, rows });
 }));
 
+// Usage over time for the line chart: per bucket and per process / trunk / DID, the peak channels in use
+// (exact, from call start/end), calls started and calls answered. Top 7 refs by calls, the rest folded into "Other".
+const USAGE_COL = { process: 'process_code', trunk: 'trunk_name', did: 'did' };
+router.get('/usage', wrap(async (req, res) => {
+  const { from, to } = dateRange(req.query);
+  const scope = USAGE_COL[req.query.scope] ? req.query.scope : 'process';
+  const col = USAGE_COL[scope];
+  const tz = require('../config').statsTz.replace(/[^A-Za-z0-9_/+\-]/g, '');
+  const days = Math.round((Date.parse(to) - Date.parse(from)) / 864e5) + 1;
+  let step = int(req.query.step, { min: 0, max: 1440, def: 0 });   // minutes, 0 = auto
+  if (![5, 15, 60, 1440].includes(step)) step = days <= 1 ? 15 : days <= 7 ? 60 : 1440;
+  while (days * 1440 / step > 2000) step = step === 5 ? 15 : step === 15 ? 60 : 1440;   // cap the point count
+  const lo = `($1::date)::timestamp AT TIME ZONE '${tz}'`, hi = `($2::date + 1)::timestamp AT TIME ZONE '${tz}'`;
+  const args = [from, to];
+  let where = `${col} IS NOT NULL AND ${col} <> '' AND start_time < ${hi} AND end_time >= ${lo}`;
+  if (req.query.ref) { args.push(str(req.query.ref, 32)); where += ` AND ${col} = $${args.length}`; }
+  const top = (await q(`SELECT ${col} AS ref FROM calls WHERE ${where} GROUP BY 1 ORDER BY count(*) DESC LIMIT 7`, args)).rows.map((r) => r.ref);
+  args.push(top);
+  const ref = `CASE WHEN ${col} = ANY($${args.length}) THEN ${col} ELSE '' END`;   // '' = Other
+  // bucket number from the range start, in seconds of local time
+  const bk = (t) => `floor(extract(epoch FROM (${t} AT TIME ZONE '${tz}') - ($1::date)::timestamp) / ${step * 60})::int`;
+  const [conc, counts] = await Promise.all([
+    q(`WITH c AS (SELECT ${ref} AS ref, greatest(start_time, ${lo}) AS s, least(end_time, ${hi}) AS e FROM calls WHERE ${where}),
+        ev AS (SELECT ref, s AS t, 1 AS d FROM c UNION ALL SELECT ref, e, -1 FROM c),
+        run AS (SELECT ref, t, sum(d) OVER (PARTITION BY ref ORDER BY t, d ROWS UNBOUNDED PRECEDING)::int AS n, d FROM ev)
+      SELECT ref, ${bk('t')} AS b, max(n) AS peak, (array_agg(n ORDER BY t DESC, d DESC, n * d DESC))[1] AS last FROM run GROUP BY 1, 2`, args),
+    q(`SELECT ${ref} AS ref, ${bk('start_time')} AS b, count(*)::int AS calls, count(answer_time)::int AS answered
+      FROM calls WHERE ${where} AND start_time >= ${lo} GROUP BY 1, 2`, args),
+  ]);
+  res.json({ from, to, scope, step, buckets: Math.ceil(days * 1440 / step), refs: top, conc: conc.rows, counts: counts.rows });
+}));
+
 router.get('/dispositions', wrap(async (req, res) => {
   res.json((await q('SELECT * FROM dispositions ORDER BY sort')).rows);
 }));

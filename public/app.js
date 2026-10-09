@@ -777,6 +777,10 @@ PAGES.stats = async (main) => {
       <label>Group by<select name="scope"><option value="process">Process</option><option value="trunk">Trunk</option><option value="did">DID</option></select></label>
       <label>Only<select name="ref"><option value="">All</option></select></label>
       <div class="actions"><button class="btn primary">Show</button></div></form></div>
+    <div class="panel" style="margin-bottom:14px"><h2>Usage over time <span class="uctl">
+      <select id="uMetric" aria-label="Measure"><option value="peak">Channels in use (peak)</option><option value="calls">Calls started</option><option value="answered">Answered calls</option></select>
+      <select id="uStep" aria-label="Interval"><option value="0">Auto interval</option><option value="5">5 min</option><option value="15">15 min</option><option value="60">1 hour</option><option value="1440">1 day</option></select></span></h2>
+      <div class="body"><div class="legend u-legend" id="uLegend"></div><div class="rh-chart" id="uChart"></div></div></div>
     <div class="panel" style="margin-bottom:14px"><h2>Calls per day</h2><div class="body" id="sChart"></div></div>
     <div class="panel"><div class="tw"><table><thead><tr><th>Day</th><th id="refH">Process</th><th class="r">Total</th><th class="r">Answered</th><th class="r">Busy</th><th class="r">No ans.</th><th class="r">Cancel</th><th class="r">Congest.</th><th class="r">Failed</th><th class="r" title="trunk / far end unreachable">SIP down</th><th class="r" title="CHANNEL_LIMIT + TRUNK_LIMIT + BLOCKED + NO_ROUTE + INVALID + OFF_HOURS + NO_HEADER + INVALID_DID">Rejected</th><th class="r">ASR</th><th class="r">ACD</th><th class="r">Talk</th><th class="r">Peak ch</th></tr></thead><tbody id="sBody"></tbody></table></div></div>`;
   const f = $('#sf');
@@ -796,7 +800,16 @@ PAGES.stats = async (main) => {
       <td class="r num">${pct(r.answered, reached)}%</td><td class="r num">${r.answered ? fmtDur(Math.round(r.talk_sec / r.answered)) : '—'}</td>
       <td class="r num">${fmtDur(r.talk_sec)}</td><td class="r num">${fmtInt(r.peak_channels)}</td></tr>`;
   };
+  let usage = null;
+  const loadUsage = async () => {
+    $('#uChart').innerHTML = '<p class="hint">Loading…</p>';
+    usage = await api('GET', '/api/reports/usage?' + new URLSearchParams({ ...formData(f), step: $('#uStep').value }));
+    usageChart($('#uChart'), $('#uLegend'), usage, $('#uMetric').value);
+  };
+  $('#uMetric').onchange = () => { if (usage) usageChart($('#uChart'), $('#uLegend'), usage, $('#uMetric').value); };
+  $('#uStep').onchange = () => loadUsage().catch((er) => toast(er.message, true));
   const load = async () => {
+    loadUsage().catch((er) => toast(er.message, true));
     const d = formData(f);
     $('#refH').textContent = { trunk: 'Trunk', did: 'DID' }[d.scope] || 'Process';
     const r = await api('GET', '/api/reports/daily?' + new URLSearchParams(d));
@@ -815,6 +828,69 @@ PAGES.stats = async (main) => {
   f.addEventListener('submit', (e) => { e.preventDefault(); load().catch((er) => toast(er.message, true)); });
   await fillRefs(); load().catch((er) => toast(er.message, true));
 };
+// Daily statistics: usage over time, one line per process / trunk / DID (top 7, rest = Other).
+// r = /api/reports/usage; metric = peak (channels in use) | calls | answered.
+function usageChart(el, legend, r, metric) {
+  const N = r.buckets, step = r.step, other = 'Other';
+  // cut today's range at the current time so the line does not drop to 0 in the future
+  let n = N;
+  if (r.to === dayStr()) {
+    const [hh, mm] = new Date().toLocaleTimeString('en-GB', { timeZone: S.tz, hour12: false }).split(':').map(Number);
+    const days = Math.round((Date.parse(r.to) - Date.parse(r.from)) / 864e5);
+    n = Math.min(N, Math.floor((days * 1440 + hh * 60 + mm) / step) + 1);
+  }
+  const names = [...r.refs]; if ([...r.conc, ...r.counts].some((x) => x.ref === '')) names.push('');
+  const series = names.map((ref, i) => {
+    const v = new Array(n).fill(0);
+    if (metric === 'peak') {   // peak inside the bucket; a bucket with no start/end keeps the level of the one before
+      const by = new Map(r.conc.filter((x) => x.ref === ref).map((x) => [x.b, x]));
+      let cur = 0; for (let b = 0; b < n; b++) { const x = by.get(b); if (x) { v[b] = x.peak; cur = x.last; } else v[b] = cur; }
+    } else for (const x of r.counts) if (x.ref === ref && x.b < n) v[x.b] = x[metric];
+    return { name: ref || other, color: ref ? `var(--s${i + 1})` : 'var(--ink-3)', v };
+  });
+  const label = (b, long) => {
+    const m = b * step, d = new Date(Date.parse(r.from) + Math.floor(m / 1440) * 864e5), dm = `${String(d.getUTCDate()).padStart(2, '0')}/${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+    const hm = `${String(Math.floor((m % 1440) / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+    return step >= 1440 ? dm : r.from === r.to && !long ? hm : `${dm} ${hm}`;
+  };
+  legend.innerHTML = series.length > 1 ? series.map((x) => `<span><i style="display:inline-block;width:14px;height:2px;border-radius:1px;background:${x.color};vertical-align:middle;margin-right:6px"></i>${esc(x.name)}</span>`).join('') : '';
+  if (!series.length || n < 1) { el.innerHTML = '<p class="hint">No calls in this range.</p>'; return; }
+  const direct = series.length > 1 && series.length <= 4;
+  const W = 900, H = 240, L = 46, R = direct ? 96 : 12, T = 10, B = 24;
+  const top = Math.max(1, ...series.flatMap((x) => x.v));
+  const mag = 10 ** Math.floor(Math.log10(top / 4)), tick = [1, 2, 2.5, 5, 10].map((k) => k * mag).find((k) => k * 4 >= top) || mag * 10, max = Math.max(4, tick * 4);
+  const x = (b) => L + (n === 1 ? (W - L - R) / 2 : (b / (n - 1)) * (W - L - R)), y = (v) => T + (1 - v / max) * (H - T - B);
+  let s = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block" role="img" aria-label="${esc($('#uMetric').selectedOptions[0].text)} over time">`;
+  for (let i = 0; i <= 4; i++) { const v = (max / 4) * i; s += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/><text x="${L - 6}" y="${y(v) + 3.5}" text-anchor="end" font-size="10" fill="var(--ink-3)" font-family="var(--mono)">${fmtInt(v)}</text>`; }
+  const ticks = Math.min(n, 8);
+  for (let i = 0; i < ticks; i++) { const b = ticks === 1 ? 0 : Math.round((i * (n - 1)) / (ticks - 1)); s += `<text x="${x(b)}" y="${H - 6}" text-anchor="${i === 0 ? 'start' : i === ticks - 1 ? 'end' : 'middle'}" font-size="10" fill="var(--ink-3)" font-family="var(--mono)">${label(b)}</text>`; }
+  for (const sr of [...series].reverse()) s += n === 1 ? `<circle cx="${x(0)}" cy="${y(sr.v[0])}" r="4" fill="${sr.color}"/>`
+    : `<path d="${sr.v.map((v, b) => `${b ? 'L' : 'M'}${x(b).toFixed(1)},${y(v).toFixed(1)}`).join('')}" fill="none" stroke="${sr.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+  if (direct) {   // end labels, nudged apart so they do not overlap
+    const ends = series.map((sr) => ({ sr, ly: y(sr.v[n - 1]) })).sort((a, b) => a.ly - b.ly);
+    for (let i = 1; i < ends.length; i++) ends[i].ly = Math.max(ends[i].ly, ends[i - 1].ly + 12);
+    ends[ends.length - 1].ly = Math.min(ends[ends.length - 1].ly, H - B - 6);
+    for (let i = ends.length - 2; i >= 0; i--) ends[i].ly = Math.min(ends[i].ly, ends[i + 1].ly - 12);
+    for (const e of ends) s += `<text x="${W - R + 6}" y="${e.ly + 3.5}" font-size="11" fill="var(--ink-2)">${esc(e.sr.name.length > 13 ? e.sr.name.slice(0, 12) + '…' : e.sr.name)}</text>`;
+  }
+  s += `<line class="rh-x" y1="${T}" y2="${H - B}" stroke="var(--ink-3)" stroke-dasharray="2 3" visibility="hidden"/>
+    ${series.map((sr) => `<circle class="u-dot" r="4" fill="${sr.color}" stroke="var(--panel)" stroke-width="2" visibility="hidden"/>`).join('')}
+    <rect x="${L}" y="0" width="${W - L - R}" height="${H}" fill="transparent"/></svg><div class="rh-tip u-tip hidden"></div>`;
+  el.innerHTML = s;
+  const svg = el.firstChild, line = svg.querySelector('.rh-x'), dots = [...svg.querySelectorAll('.u-dot')], tip = el.querySelector('.u-tip');
+  svg.addEventListener('pointermove', (e) => {
+    const bx = svg.getBoundingClientRect(), px = ((e.clientX - bx.left) / bx.width) * W;
+    const b = n === 1 ? 0 : Math.min(n - 1, Math.max(0, Math.round(((px - L) / (W - L - R)) * (n - 1))));
+    line.setAttribute('x1', x(b)); line.setAttribute('x2', x(b)); line.setAttribute('visibility', 'visible');
+    series.forEach((sr, i) => { dots[i].setAttribute('cx', x(b)); dots[i].setAttribute('cy', y(sr.v[b])); dots[i].setAttribute('visibility', 'visible'); });
+    tip.innerHTML = `<div style="margin-bottom:2px">${label(b, true)}${step < 1440 ? ` <span style="color:var(--ink-3)">+${step >= 60 ? step / 60 + ' h' : step + ' min'}</span>` : ''}</div>` +
+      series.map((sr) => `<div><i style="display:inline-block;width:10px;height:2px;background:${sr.color};vertical-align:middle;margin-right:6px"></i><b class="num">${fmtInt(sr.v[b])}</b> ${esc(sr.name)}</div>`).join('');
+    tip.classList.remove('hidden');
+    const sx = (x(b) / W) * bx.width;
+    tip.style.left = `${sx > bx.width / 2 ? sx - tip.offsetWidth - 12 : sx + 12}px`;
+  });
+  svg.addEventListener('pointerleave', () => { line.setAttribute('visibility', 'hidden'); dots.forEach((d) => d.setAttribute('visibility', 'hidden')); tip.classList.add('hidden'); });
+}
 // System page: history of one resource in a modal. key = cpu | mem | disk:<mount>
 function resourceGraph(key, title) {
   const get = key === 'cpu' ? (p) => p.cpu : key === 'mem' ? (p) => p.mem : ((m) => (p) => p.disks[m])(key.slice(5));
