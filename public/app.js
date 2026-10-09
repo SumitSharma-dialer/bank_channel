@@ -9,6 +9,7 @@ const fmtInt = (n) => (+n || 0).toLocaleString('en-IN');
 const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
 const fmtDur = (s) => { s = +s || 0; const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60; return h ? `${h}h ${m}m` : m ? `${m}m ${String(x).padStart(2, '0')}s` : `${x}s`; };
 const fmtTime = (d) => d ? new Date(d).toLocaleString('en-GB', { timeZone: S.tz, day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
+const fmtShort = (d) => d ? new Date(d).toLocaleString('en-GB', { timeZone: S.tz, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).replace(',', '') : '';
 const clock = (ms) => new Date(ms).toLocaleTimeString('en-GB', { timeZone: S.tz });
 const dayStr = (d = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: S.tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
 const daysAgo = (n) => dayStr(new Date(Date.now() - n * 86400e3));
@@ -738,7 +739,7 @@ PAGES.cdr = async (main) => {
       <label>DID<input name="did" placeholder="exact DID" class="mono"></label>
       <div class="actions"><button class="btn primary">Search</button><button type="button" class="btn" id="csv">Export CSV</button></div>
     </form><div class="summary" id="cSum"></div>
-    <div class="tw"><table><thead><tr><th>Start</th><th>Process</th><th>Trunk</th><th>Dummy link number</th><th>Customer number</th><th>Caller ID</th><th>DID</th><th>Disposition</th><th class="r">Ring</th><th class="r">Talk</th><th class="r">Cause</th></tr></thead><tbody id="cBody"></tbody></table></div>
+    <div class="tw"><table><thead><tr><th>Call time</th><th>Process</th><th>Trunk</th><th>Dummy link number</th><th>Customer number</th><th>Caller ID</th><th>DID</th><th>Disposition</th><th class="r">Ring</th><th class="r">Talk</th><th class="r">Cause</th></tr></thead><tbody id="cBody"></tbody></table></div>
     <div class="pager" id="cPager"></div></div>`;
   const f = $('#cf'); let page = 1;
   const qs = () => new URLSearchParams({ ...formData(f), page }).toString();
@@ -750,7 +751,7 @@ PAGES.cdr = async (main) => {
       $('#cSum').innerHTML = `<span class="chip">${fmtInt(r.total)} calls</span><span class="chip">talk ${fmtDur(r.talkSec)}</span><span class="chip">ASR ${pct(ans, r.total)}%</span>` +
         r.byDisposition.map((d) => `<span class="chip ${DISP_CLASS[d.disposition] || ''}">${esc(dispName(d.disposition))} ${fmtInt(d.n)}</span>`).join('');
       $('#cBody').innerHTML = r.rows.length ? r.rows.map((c) => `<tr>
-        <td class="mono" style="font-size:12.5px;white-space:nowrap">${fmtTime(c.start_time)}</td><td>${esc(c.process_code || '')}</td><td>${esc(c.trunk_name || '')}</td>
+        <td class="mono" style="font-size:12.5px;white-space:nowrap" title="${fmtTime(c.start_time)}">${fmtShort(c.start_time)}</td><td>${esc(c.process_code || '')}</td><td>${esc(c.trunk_name || '')}</td>
         <td class="mono">${c.direction === 'in' ? '<span class="chip info" title="inbound call to a DID">in</span> ' : ''}${esc(c.dialed || '')}</td><td class="mono" style="color:var(--ink-2)">${esc(c.sent_number || '')}</td>
         <td class="mono" style="font-size:12.5px"${c.cli_out ? ` title="sent to carrier as ${esc(c.cli_out)}"` : ''}>${esc(c.cli_in || '')}</td>
         <td class="mono" style="font-size:12.5px">${esc(c.did || '')}${c.hdr_status && c.hdr_status !== 'none' ? ` <span class="chip ${c.hdr_status === 'ok' ? 'ok' : 'bad'}" title="header dialing call">hdr ${esc(HDR_TXT[c.hdr_status] || c.hdr_status)}</span>` : ''}</td><td>${dispChip(c.disposition)}</td>
