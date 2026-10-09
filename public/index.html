@@ -6,8 +6,8 @@
 <title>IOTIndia</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23101418'/%3E%3Cpath d='M6 10h8M6 16h8M6 22h8M18 16h8M14 10l4 6-4 6' stroke='%2337d39a' stroke-width='2.4' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=sys23">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css?v=sys24">
 </head>
 <body>
 <div id="login" class="login hidden">
@@ -37,6 +37,7 @@
       <a href="#/system"     data-page="system"><i>⚙</i>System</a>
     </nav>
     <div class="side-foot">
+      <div class="theme-sw" id="themeSw" role="group" aria-label="Theme"><button data-theme="auto" title="Follow the system">◐ Auto</button><button data-theme="light">☀ Light</button><button data-theme="dark">☾ Dark</button></div>
       <div class="conn" id="conn"><span class="dot"></span><span>connecting…</span></div>
       <div class="who"><span id="who"></span><span><button class="link" id="myPw">Password</button> · <button class="link" id="logout">Sign out</button></span></div>
     </div>
@@ -46,6 +47,6 @@
 
 <div id="modal" class="modal hidden"><div class="modal-card" role="dialog" aria-modal="true"></div></div>
 <div id="toasts"></div>
-<script src="app.js?v=sys23"></script>
+<script src="app.js?v=sys24"></script>
 </body>
 </html>

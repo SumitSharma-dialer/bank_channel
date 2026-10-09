@@ -79,6 +79,15 @@ const confirmBox = (title, text, okLabel = 'Delete') => new Promise((resolve) =>
 });
 const formData = (form) => Object.fromEntries([...new FormData(form).entries()].map(([k, v]) => [k, typeof v === 'string' ? v.trim() : v]));
 
+// ------------------------------------------------------------------ theme (sidebar switch, remembered per browser)
+function setTheme(t) {
+  if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme;
+  $$('#themeSw button').forEach((b) => b.classList.toggle('on', b.dataset.theme === (t || 'auto')));
+  try { localStorage.setItem('sd_theme', t || 'auto'); } catch { /* private mode */ }
+}
+setTheme((() => { try { return localStorage.getItem('sd_theme'); } catch { return null; } })() || 'auto');
+$('#themeSw').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) setTheme(b.dataset.theme); });
+
 // ------------------------------------------------------------------ auth
 function showLogin() { S.feed = []; S.snap = null; S.me = null; $('#app').classList.add('hidden'); $('#login').classList.remove('hidden'); if (S.ws) { S.ws.onclose = null; S.ws.close(); S.ws = null; } }
 $('#loginForm').addEventListener('submit', async (e) => {
@@ -1698,7 +1707,7 @@ PAGES.alerts = async (main) => {
 
 // =================================================================== USERS
 const TAB_LABEL = { live: 'Live dashboard', cdr: 'CDR report', stats: 'Daily statistics' };
-const ROLE_CHIP = { superadmin: '<span class="chip ok">Super admin</span>', admin: '<span class="chip info">Admin</span>', viewer: '<span class="chip">Monitor</span>' };
+const ROLE_CHIP = { superadmin: '<span class="chip brand">Super admin</span>', admin: '<span class="chip info">Admin</span>', viewer: '<span class="chip">Monitor</span>' };
 const ROLE_NAME = { superadmin: 'super admin', admin: 'admin', viewer: 'monitor' };
 const uaShort = (ua) => {
   ua = ua || '';
