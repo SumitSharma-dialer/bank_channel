@@ -349,3 +349,5 @@ details.setup pre { margin-top: 8px; white-space: pre-wrap; }
 .u-legend { padding: 0 0 8px; }
 .u-tip { top: 4px; line-height: 1.5; }
 @media (max-width: 640px) { .panel > h2:has(.uctl) { flex-wrap: wrap; gap: 6px; } }
+ol.steps { margin: 10px 0 12px; padding-left: 20px; font-size: 13px; color: var(--ink-2); display: flex; flex-direction: column; gap: 7px; line-height: 1.5; }
+ol.steps code, details.setup .hint code { font-size: 12px; }

@@ -65,7 +65,45 @@ test('failures are logged, never thrown; status hides secrets', async () => {
   logged.length = 0;
   await alerts.notify([{ kind: 'opened', issue: crit }]);
   assert.deepStrictEqual(logged.map((a) => [a[0], a[3], a[4]]), [['slack', false, 'Slack 404 no_service'], ['email', false, '535 Username and Password not accepted']]);
-  const st = JSON.stringify(alerts.status());
+  const st = JSON.stringify(await alerts.status());
   assert.ok(!st.includes('abcdefghijklmnop') && !st.includes('services/T1'));
-  assert.match(st, /"from":"ale…@gmail.com"/);
+  assert.match(st, /"fromMasked":"ale…@gmail.com"/);
+});
+
+test('per-type routes from the Alerts page; @channel mention on critical', async () => {
+  const sent = []; global.fetch = async (url, o) => { sent.push(JSON.parse(o.body)); return { ok: true, text: async () => 'ok' }; };
+  const ms = []; alerts._set({ transport: { sendMail: async (m) => { ms.push(m); } } });
+  Object.assign(alerts.conf, { routes: { sip_down: 'email', limit: 'off' }, slackMention: true });
+  assert.strictEqual(alerts.routeOf(crit), 'email');
+  assert.strictEqual(alerts.routeOf({ key: 'failrate:x', severity: 'critical' }), 'both');
+  await alerts.notify([{ kind: 'opened', issue: crit }, { kind: 'opened', issue: warn }]);
+  assert.strictEqual(sent.length, 0);   // sip_down -> email only, limit -> off
+  assert.strictEqual(ms.length, 1); assert.match(ms[0].subject, /SIP DOWN/);
+  await alerts.notify([{ kind: 'opened', issue: { ...crit, key: 'failrate:x', title: 'High failure rate on trunk x' } }]);
+  assert.match(sent[0].text, /^<!channel> \*SIPDist test\*/);
+  Object.assign(alerts.conf, { routes: {}, slackMention: false });
+});
+
+test('save validates input and keeps saved secrets when left blank', async () => {
+  let row = {};
+  alerts._set({ q: async (sql, args) => {
+    if (/^SELECT \* FROM alert_settings/.test(sql)) return { rows: [row] };
+    if (/^INSERT INTO alert_settings/.test(sql)) {
+      const cols = sql.match(/alert_settings\(id, ([^)]+)\)/)[1].split(',');
+      row = Object.fromEntries(cols.slice(0, -1).map((c, i) => [c, c === 'routes' ? JSON.parse(args[i]) : args[i]]));
+    }
+    return { rows: [] };
+  } });
+  await assert.rejects(alerts.save({ slack: { webhook: 'https://example.com/x' } }), /hooks\.slack\.com/);
+  await assert.rejects(alerts.save({ email: { pass: 'short' } }), /16 letters/);
+  await assert.rejects(alerts.save({ rules: { routes: { nope: 'both' } } }), /unknown alert type/);
+  let st = await alerts.save({ slack: { webhook: 'https://hooks.slack.com/services/T9/B9/xyz', mention: true },
+    email: { user: 'a@gmail.com', pass: 'abcd efgh ijkl mnop', to: 'x@y.com, z@y.com' }, rules: { remindMin: 15, routes: { lowasr: 'off', sip_down: 'both' } } });
+  assert.ok(st.slack.configured && st.slack.mention && st.email.configured);
+  assert.deepStrictEqual(row.routes, { lowasr: 'off' });   // sip_down 'both' is the default: not stored
+  assert.strictEqual(alerts.conf.remindMin, 15);
+  st = await alerts.save({ email: { user: '', pass: '', to: 'x@y.com' } });   // blank = keep
+  assert.strictEqual(row.gmail_pass, 'abcdefghijklmnop'); assert.ok(st.email.configured);
+  st = await alerts.save({ clear: ['slack'] });
+  assert.ok(!st.slack.configured);
 });

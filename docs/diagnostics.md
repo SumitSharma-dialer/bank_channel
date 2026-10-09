@@ -81,14 +81,27 @@ reached: qualify says unreachable / no contact) is now stored as `SIP_DOWN` inst
 
 ## Alerts (Slack & Gmail)
 
-The issue tracker sends one grouped message per check run when issues **open**, **resolve**, or are still open
-(**reminder**). Configured only in `/opt/sipdist/.env` (restart `sipdist` after a change); the UI (Diagnostics →
-Issues → Alerts) shows whether each channel is on, has **Send test** buttons and the last 30 sent alerts
-(table `alert_log`). Secrets are never sent to the browser or written to the log.
+The issue tracker sends one grouped message per channel per check run when issues **open**, **resolve**, or are
+still open (**reminder**). Alerts are configured on the **Alerts** page (sidebar), which has:
+
+- **Slack**: paste an Incoming Webhook URL, with optional `@channel` on critical alerts. **Send test**, **Remove**, and a step-by-step guide
+  (api.slack.com/apps → Create New App → Incoming Webhooks → Add New Webhook → pick channel → copy URL).
+- **Alert rules**: for each alert type (issue key prefix in `src/diag/issues.js`), *Slack* or *Off*. When Gmail is set up
+  in `.env`, the choices become *Slack + email*, *Slack only*, *Email only* or *Off*. Also the reminder interval,
+  resolved messages and the server name.
+- **Recently sent**: the last 30 rows of `alert_log`.
+
+The Gmail panel is hidden on the page. Email alerts still work if the `ALERT_GMAIL_*` / `ALERT_EMAIL_TO` variables
+are set in `.env` (restart `sipdist` after a change).
+
+Settings are stored in table `alert_settings` (single row; `PUT /api/diag/alerts`). A field that was never saved on the
+page falls back to the `.env` variables below. The webhook URL and app password are never sent back to the browser or
+written to the audit log. Default routing: critical → Slack + email, warning → Slack (+ email with `ALERT_WARNINGS_EMAIL=1`).
 
 | Variable | Meaning |
 |---|---|
 | `ALERT_SLACK_WEBHOOK` | Slack incoming webhook URL (`https://hooks.slack.com/services/…`) |
+| `ALERT_SLACK_MENTION` | `1` = `@channel` on critical alerts |
 | `ALERT_GMAIL_USER` | Gmail address that sends the emails |
 | `ALERT_GMAIL_APP_PASSWORD` | Google App Password (myaccount.google.com/apppasswords, needs 2-Step Verification) — not the normal password |
 | `ALERT_EMAIL_TO` | recipients, comma-separated |

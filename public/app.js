@@ -1108,49 +1108,19 @@ function targetWire(f) {
 // ---------------------------------------------------------------- issues
 DiagTab.issues = async (el) => {
   el.innerHTML = `<div class="panel" style="margin-bottom:14px"><h2>Open issues <span><button class="btn sm" id="iRun">Run checks now</button></span></h2><div class="body" id="iOpen">Loading…</div></div>
-    <div class="panel" style="margin-bottom:14px"><h2>Alerts — Slack &amp; Gmail</h2><div class="body" id="aBox">Loading…</div></div>
     <div class="panel"><h2>Issue history</h2><div class="tw" style="max-height:440px;overflow:auto"><table><thead><tr><th>Severity</th><th>Issue</th><th>Detail</th><th>Opened</th><th>Closed</th><th class="r">Lasted</th></tr></thead><tbody id="iHist"></tbody></table></div></div>`;
   const draw = (r) => {
     $('#iOpen').innerHTML = r.open.length ? r.open.map((i) => `<div class="issue ${i.severity}">
         <div class="ih"><span class="chip ${i.severity === 'critical' ? 'bad' : 'warn'}">${esc(i.severity)}</span><b>${esc(i.title)}</b><span class="when">open ${ago(new Date(i.opened_at))} · since ${fmtTime(i.opened_at)}</span></div>
         <div class="id">${esc(i.detail || '')}</div>${i.hint ? `<div class="ihint">→ ${esc(i.hint)}</div>` : ''}</div>`).join('')
       : `<div class="allgood"><span class="chip ok">OK</span> No open issues. Checks run every 30 s${r.lastRun ? ` · last ${clock(r.lastRun)}` : ''}.</div>`;
+    $('#iOpen').insertAdjacentHTML('beforeend', `<p class="hint" style="margin-top:10px">Slack notifications for these issues: <a href="#/alerts">Alerts page</a>.</p>`);
     $('#iHist').innerHTML = r.history.length ? r.history.map((i) => `<tr><td><span class="chip ${i.severity === 'critical' ? 'bad' : 'warn'}">${esc(i.severity)}</span></td>
       <td>${esc(i.title)}</td><td style="font-size:12.5px;color:var(--ink-2)">${esc(i.detail || '')}</td>
       <td class="mono" style="font-size:12px;white-space:nowrap">${fmtTime(i.opened_at)}</td><td class="mono" style="font-size:12px;white-space:nowrap">${fmtTime(i.closed_at)}</td>
       <td class="r num">${durBetween(i.opened_at, i.closed_at)}</td></tr>`).join('') : `<tr><td colspan="6" class="empty">No closed issues yet.</td></tr>`;
   };
-  const alertsBox = async () => {
-    const a = await api('GET', '/api/diag/alerts');
-    const ch = (name, on, extra, missing) => `<div class="hbox"><div class="lab">${name}</div><div class="v"><span class="chip ${on ? 'ok' : ''}">${on ? 'ON' : 'NOT SET UP'}</span> ${extra}</div>
-      ${missing ? `<div class="hint" style="margin-top:4px">${missing}</div>` : ''}
-      <button class="btn sm" style="margin-top:8px" data-test="${name.toLowerCase().startsWith('slack') ? 'slack' : 'email'}" ${on ? '' : 'disabled'}>Send test</button></div>`;
-    $('#aBox').innerHTML = `<div class="health">
-        ${ch('Slack', a.slack.configured, '', a.slack.invalid ? 'ALERT_SLACK_WEBHOOK is not a https://hooks.slack.com/services/… URL' : a.slack.configured ? '' : 'Add ALERT_SLACK_WEBHOOK to .env')}
-        ${ch('Email (Gmail)', a.email.configured, a.email.configured ? `<small>${esc(a.email.from)} → ${esc(a.email.to.join(', '))}</small>` : '', a.email.configured ? '' : `Missing in .env: ${a.email.missing.join(', ')}`)}
-        <div class="hbox"><div class="lab">Rules</div><div class="v" style="font-weight:400;font-size:12.5px">Critical → Slack + email · Warnings → Slack${a.rules.warningsEmail ? ' + email' : ' only'}<br>
-          ${a.rules.resolved ? 'Resolved messages on' : 'No resolved messages'} · ${a.rules.remindMin ? `reminder every ${a.rules.remindMin} min while critical` : 'no reminders'}</div></div></div>
-      ${!a.slack.configured || !a.email.configured ? `<details class="setup" style="margin-top:12px"><summary>How to set up</summary>
-        <p class="hint">Add these lines to <code>/opt/sipdist/.env</code> on the server, then <code>systemctl restart sipdist</code>. Secrets stay on the server; this page never shows them.</p>
-        <pre class="code">ALERT_SLACK_WEBHOOK=https://hooks.slack.com/services/XXX/YYY/ZZZ   # Slack → Apps → Incoming Webhooks → channel
-ALERT_GMAIL_USER=alerts.yourcompany@gmail.com
-ALERT_GMAIL_APP_PASSWORD=abcd efgh ijkl mnop   # myaccount.google.com/apppasswords (needs 2-Step Verification)
-ALERT_EMAIL_TO=noc@yourcompany.com,ops@yourcompany.com
-# optional: ALERT_WARNINGS_EMAIL=1  ALERT_REMIND_MIN=30  ALERT_RESOLVED=1  ALERT_NAME="SIPDist Mumbai"</pre></details>` : ''}
-      <h3 class="sub">Recently sent</h3>
-      <div class="tw" style="max-height:240px;overflow:auto"><table><thead><tr><th>When</th><th>Channel</th><th>Type</th><th>Message</th><th>Result</th></tr></thead><tbody>
-      ${a.recent.length ? a.recent.map((r) => `<tr><td class="mono" style="font-size:12px;white-space:nowrap">${fmtTime(r.at)}</td><td>${esc(r.channel)}</td><td>${esc(r.kind)}</td>
-        <td style="font-size:12.5px">${esc(r.subject || '')}</td><td>${r.ok ? '<span class="chip ok">sent</span>' : `<span class="chip bad" title="${esc(r.error || '')}">failed</span> <small>${esc((r.error || '').slice(0, 80))}</small>`}</td></tr>`).join('')
-        : '<tr><td colspan="5" class="empty" style="padding:14px">Nothing sent yet.</td></tr>'}</tbody></table></div>`;
-    $$('#aBox [data-test]').forEach((b) => (b.onclick = async () => {
-      b.disabled = true;
-      try { await api('POST', '/api/diag/alerts/test', { channel: b.dataset.test }); toast(`Test ${b.dataset.test} alert sent`); }
-      catch (e) { toast(e.message, true); }
-      finally { b.disabled = false; alertsBox().catch(() => {}); }
-    }));
-  };
   const load = async () => draw(await api('GET', '/api/diag/issues'));
-  alertsBox().catch((e) => ($('#aBox').textContent = e.message));
   $('#iRun').onclick = async () => { $('#iRun').disabled = true; try { draw(await api('POST', '/api/diag/issues/run')); toast('Checks done'); } finally { $('#iRun').disabled = false; } };
   await load(); diagPoll(load, 15000);
 };
@@ -1532,6 +1502,98 @@ DiagTab.lookup = async (el) => {
       <div class="panel"><h2>Asterisk log lines <span class="chip">${log ? log.lines.length : 0}</span></h2><div class="body"><pre class="code logbox">${log && log.lines.length ? log.lines.map((l) => esc(l)).join('\n') : 'No matching log lines.'}</pre></div></div>`;
     $$('#clOut [data-flow]').forEach((a) => (a.onclick = (ev) => { ev.preventDefault(); Diag.tab = 'sip'; location.hash = '#/diag?tab=sip'; setTimeout(() => flow(a.dataset.flow), 400); }));
   });
+};
+
+// =================================================================== ALERTS
+const ROUTE_LABEL = { both: 'Slack + email', slack: 'Slack only', email: 'Email only', off: 'Off' };
+PAGES.alerts = async (main) => {
+  main.innerHTML = `<div class="head"><div><h1>Alerts</h1><p>Slack notifications when the health checks (<a href="#/diag?tab=issues">Diagnostics → Issues</a>, every 30 s) open, resolve or keep failing.</p></div></div>
+    <div class="panel" style="margin-bottom:14px"><h2>Status</h2><div class="body"><div class="health" id="alStatus">Loading…</div></div></div>
+    <div class="panel" style="margin-bottom:14px"><h2>Slack</h2><form class="body" id="alSlack" style="max-width:860px"></form></div>
+    <div class="panel" style="margin-bottom:14px"><h2>Alert rules <span><button class="btn sm primary" id="alRulesSave">Save rules</button></span></h2><div class="body" id="alRules"></div></div>
+    <div class="panel"><h2>Recently sent</h2><div class="tw" style="max-height:340px;overflow:auto"><table><thead><tr><th>When</th><th>Channel</th><th>Type</th><th>Message</th><th>Result</th></tr></thead><tbody id="alLog"></tbody></table></div></div>`;
+
+  const save = async (body, what) => { const a = await api('PUT', '/api/diag/alerts', body); toast(`${what} saved`); draw(a); return a; };
+  const sendTest = async (ch, btn) => {
+    btn.disabled = true;
+    try { await api('POST', '/api/diag/alerts/test', { channel: ch }); toast('Test alert sent — check the Slack channel'); }
+    catch (e) { toast(e.message, true); }
+    finally { btn.disabled = false; draw(await api('GET', '/api/diag/alerts')); }
+  };
+  const fromUi = (a, k, set) => (set && a.source[k] !== 'ui' ? ' <small class="hint">(from .env)</small>' : '');
+
+  const draw = (a) => {
+    const on = (x) => `<span class="chip ${x ? 'ok' : ''}">${x ? 'ON' : 'NOT SET UP'}</span>`;
+    const n = a.types.filter((t) => t.route !== 'off').length;
+    $('#alStatus').innerHTML = `
+      <div class="hbox"><div class="lab">Slack</div><div class="v">${on(a.slack.configured)}${a.slack.invalid ? ' <span class="chip bad">invalid URL</span>' : ''}</div></div>
+      ${a.email.configured ? `<div class="hbox"><div class="lab">Email</div><div class="v"><span class="chip ok">ON</span> <small>${esc(a.email.to.length)} recipient(s), from .env</small></div></div>` : ''}
+      <div class="hbox"><div class="lab">Alert types on</div><div class="v">${n} of ${a.types.length}</div></div>
+      <div class="hbox"><div class="lab">Reminders</div><div class="v" style="font-weight:400;font-size:12.5px">${a.rules.remindMin ? `every ${a.rules.remindMin} min while critical` : 'off'} · ${a.rules.resolved ? 'resolved messages on' : 'no resolved messages'}</div></div>`;
+
+    // ---- Slack
+    $('#alSlack').innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div>${on(a.slack.configured)}${fromUi(a, 'slack', a.slack.configured)}</div>
+        <label>Incoming webhook URL<input name="webhook" class="mono" autocomplete="off" spellcheck="false"
+          placeholder="${a.slack.configured ? 'saved — leave blank to keep, or paste a new URL' : 'https://hooks.slack.com/services/T…/B…/…'}">
+          <small>Kept on the server only. This page never shows it again.</small></label>
+        <label class="check"><input type="checkbox" name="mention" ${a.slack.mention ? 'checked' : ''}> Mention <code>@channel</code> on critical alerts and reminders</label>
+        <div class="row" style="justify-content:flex-start;gap:8px"><button class="btn primary">Save</button>
+          <button type="button" class="btn" data-t ${a.slack.configured ? '' : 'disabled'}>Send test</button>
+          ${a.slack.configured && a.source.slack === 'ui' ? '<button type="button" class="btn danger" data-clear>Remove</button>' : ''}</div>
+      </div>
+      <details class="setup" style="margin-top:14px" ${a.slack.configured ? '' : 'open'}><summary>How to connect Slack (5 minutes)</summary>
+        <ol class="steps">
+          <li>Open <a href="https://api.slack.com/apps" target="_blank" rel="noopener">api.slack.com/apps</a> while signed in to your Slack workspace and click <b>Create New App → From scratch</b>.
+            Name it e.g. <i>SIPDist alerts</i> and pick the workspace.</li>
+          <li>In the app's left menu open <b>Features → Incoming Webhooks</b> and switch <b>Activate Incoming Webhooks</b> on.</li>
+          <li>Click <b>Add New Webhook to Workspace</b> (bottom of the page), choose the channel for alerts (e.g. <code>#noc-alerts</code>) and click <b>Allow</b>.
+            For a private channel you must be a member of it first. If your workspace needs admin approval, ask a Slack admin to approve the app.</li>
+          <li>Copy the new <b>Webhook URL</b>. It looks like <code>https://hooks.slack.com/services/T0…/B0…/xxxxxxxx</code>.</li>
+          <li>Paste it in the box above, click <b>Save</b>, then <b>Send test</b>. A ✅ test message should show up in the channel within a few seconds.</li>
+        </ol>
+        <p class="hint"><b>Each webhook posts to one channel.</b> To send alerts to a different channel, add another webhook in the same Slack app and paste the new URL here.
+          Anyone with the URL can post to the channel, so treat it like a password. If it leaks, delete it in Slack (Incoming Webhooks → Remove) and save a new one.</p>
+        <p class="hint" style="margin-top:6px"><b>If the test fails:</b> <code>404 no_service</code> / <code>410</code> means the webhook was removed or the app uninstalled, so create a new one.
+          <code>403 invalid_token</code> means the URL was copied wrong. <code>404 channel_not_found</code> means the channel was archived or deleted.
+          A timeout means this server cannot reach <code>hooks.slack.com:443</code>. Allow outbound HTTPS in the firewall.</p>
+        <p class="hint" style="margin-top:6px">Alternative: set <code>ALERT_SLACK_WEBHOOK=…</code> in <code>/opt/sipdist/.env</code> and restart <code>sipdist</code>. A URL saved on this page takes priority over <code>.env</code>.</p>
+      </details>`;
+    const fs = $('#alSlack');
+    fs.onsubmit = async (e) => { e.preventDefault(); try { await save({ slack: { webhook: fs.webhook.value.trim(), mention: fs.mention.checked } }, 'Slack settings'); } catch (err) { toast(err.message, true); } };
+    $('[data-t]', fs).onclick = (e) => sendTest('slack', e.currentTarget);
+    if ($('[data-clear]', fs)) $('[data-clear]', fs).onclick = async () => { if (await confirmBox('Remove Slack webhook', 'Slack alerts stop until a new webhook URL is saved.', 'Remove')) save({ clear: ['slack'] }, 'Slack webhook removed').catch((e) => toast(e.message, true)); };
+
+    // ---- Rules: the Gmail panel is hidden, so the email choices only show when email is set up in .env
+    const em = a.email.configured;
+    const shown = (r) => (em ? r : r === 'both' ? 'slack' : r === 'email' ? 'off' : r);
+    const labels = em ? ROUTE_LABEL : { slack: 'Slack', off: 'Off' };
+    $('#alRules').innerHTML = `
+      <div class="fgrid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));margin-bottom:14px">
+        <label>Reminder for critical issues still open <small>minutes, 0 = off</small><input name="remindMin" type="number" min="0" max="1440" value="${a.rules.remindMin}"></label>
+        <label>Server name in messages<input name="name" value="${esc(a.name)}" maxlength="60"></label>
+        <label class="check" style="align-self:end"><input type="checkbox" name="resolved" ${a.rules.resolved ? 'checked' : ''}> Send a message when an issue is resolved</label>
+      </div>
+      <p class="hint" style="margin-bottom:8px">${em ? 'Choose where each alert goes. Alerts from the same check run are grouped into one message per channel.' : 'Turn each alert type on or off. Alerts from the same check run are grouped into one Slack message.'}</p>
+      <div class="tw"><table><thead><tr><th>Severity</th><th>Alert</th><th>When</th><th style="width:170px">Send to</th></tr></thead><tbody>
+        ${a.types.map((t) => `<tr><td><span class="chip ${t.severity === 'critical' ? 'bad' : 'warn'}">${t.severity}</span></td><td><b>${esc(t.label)}</b></td>
+          <td style="font-size:12.5px;color:var(--ink-2)">${esc(t.about)}</td>
+          <td><select data-type="${t.type}" data-route="${t.route}">${Object.entries(labels).map(([k, l]) => `<option value="${k}" ${shown(t.route) === k ? 'selected' : ''}>${l}</option>`).join('')}</select></td></tr>`).join('')}
+      </tbody></table></div>`;
+    $('#alRulesSave').onclick = async () => {
+      const r = $('#alRules'), routes = {};
+      // unchanged rows keep their saved route (e.g. 'both' shown as 'Slack' while email is not set up)
+      $$('select[data-type]', r).forEach((x) => (routes[x.dataset.type] = x.value === shown(x.dataset.route) ? x.dataset.route : x.value));
+      try { await save({ rules: { remindMin: $('[name=remindMin]', r).value, name: $('[name=name]', r).value, resolved: $('[name=resolved]', r).checked, routes } }, 'Alert rules'); }
+      catch (e) { toast(e.message, true); }
+    };
+
+    $('#alLog').innerHTML = a.recent.length ? a.recent.map((r) => `<tr><td class="mono" style="font-size:12px;white-space:nowrap">${fmtTime(r.at)}</td><td>${esc(r.channel)}</td><td>${esc(r.kind)}</td>
+      <td style="font-size:12.5px">${esc(r.subject || '')}</td><td>${r.ok ? '<span class="chip ok">sent</span>' : `<span class="chip bad" title="${esc(r.error || '')}">failed</span> <small>${esc((r.error || '').slice(0, 100))}</small>`}</td></tr>`).join('')
+      : '<tr><td colspan="5" class="empty" style="padding:14px">Nothing sent yet.</td></tr>';
+  };
+  try { draw(await api('GET', '/api/diag/alerts')); } catch (e) { $('#alStatus').textContent = e.message; }
 };
 
 // =================================================================== SYSTEM

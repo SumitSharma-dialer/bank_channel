@@ -63,7 +63,13 @@ router.post('/issues/run', wrap(async (req, res) => { await issues.run(); res.js
 
 // ------------------------------------------------------------------ alerts (Slack / Gmail)
 const alerts = require('../diag/alerts');
-router.get('/alerts', wrap(async (req, res) => res.json({ ...alerts.status(), recent: await alerts.recent() })));
+router.get('/alerts', wrap(async (req, res) => res.json({ ...(await alerts.status()), recent: await alerts.recent() })));
+router.put('/alerts', wrap(async (req, res) => {
+  const st = await alerts.save(req.body || {});
+  // never log secrets: only which sections changed
+  await audit(req.user, 'alert_settings', 'diag', null, { sections: Object.keys(req.body || {}).filter((k) => k !== 'clear'), clear: req.body.clear });
+  res.json({ ...st, recent: await alerts.recent() });
+}));
 router.post('/alerts/test', wrap(async (req, res) => {
   await alerts.test(String(req.body.channel || ''));
   await audit(req.user, 'alert_test', 'diag', null, { channel: req.body.channel });

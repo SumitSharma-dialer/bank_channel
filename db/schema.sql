@@ -506,6 +506,23 @@ CREATE TABLE IF NOT EXISTS alert_log (
 );
 CREATE INDEX IF NOT EXISTS alert_log_at_idx ON alert_log(at DESC);
 
+-- Alerts page settings (single row, src/diag/alerts.js). NULL = use the ALERT_* value from .env.
+-- routes: { <alert type>: 'both'|'slack'|'email'|'off' } — missing type = default for its severity.
+CREATE TABLE IF NOT EXISTS alert_settings (
+  id              SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  slack_webhook   TEXT,
+  slack_mention   BOOLEAN,                -- @channel on critical alerts
+  gmail_user      TEXT,
+  gmail_pass      TEXT,
+  email_to        TEXT,                   -- comma-separated
+  warnings_email  BOOLEAN,
+  remind_min      INT,
+  resolved        BOOLEAN,
+  name            TEXT,
+  routes          JSONB NOT NULL DEFAULT '{}',
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- label, sip_code and custom_code are editable in the UI (Dispositions page): only set them for new rows
 INSERT INTO dispositions(code,label,source,sip_code,sort,custom_code) VALUES
   ('ANSWERED',      'Answered',                       'trunk',       200, 1, ''),
