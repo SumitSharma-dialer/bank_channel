@@ -31,6 +31,7 @@ router.get('/', wrap(async (req, res) => {
   const f = filter(req.query, { user: 'username', text: ['action', 'detail', 'path', 'query', 'ip', 'username'] });
   if (req.query.writes === '1') f.sql += ` AND method <> 'GET'`;
   if (req.query.failed === '1') f.sql += ' AND status >= 400';
+  if (req.query.auth === '1') f.sql += ` AND path IN ('/api/login', '/api/logout', '/session')`;
   const p = paging(req.query);
   const [rows, count, users] = await Promise.all([
     q(`SELECT * FROM activity_log WHERE ${f.sql} ORDER BY at DESC, id DESC ${p.sql}`, f.args),

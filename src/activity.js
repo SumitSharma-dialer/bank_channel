@@ -5,7 +5,7 @@
 // (timers on the System / Processes / Diagnostics pages) are not logged, and the same GET of the same session is
 // logged at most once a minute, so the log shows what people did, not timer noise.
 const { q, requestCtx } = require('./db');
-const { clientIp } = require('./auth');
+const { clientIp, bus } = require('./auth');
 
 const DEDUP_MS = 60 * 1000;
 const seen = new Map();   // `${sid} ${method} ${url}` -> last logged
@@ -86,7 +86,7 @@ function viewDetail(query) {
   const from = p.get('from'), to = p.get('to');
   if (from || to) out.push(from && to && from !== to ? `${from} → ${to}` : from || to);
   for (const [k, v] of p) {
-    if (!v || ['from', 'to', 'size', 'sort', 'page', 'writes', 'failed', 'id'].includes(k)) continue;
+    if (!v || ['from', 'to', 'size', 'sort', 'page', 'writes', 'failed', 'auth', 'id'].includes(k)) continue;
     if (k === 'direction') out.push(v === 'in' ? 'inbound' : 'outbound');
     else if (k === 'number') out.push(`number contains ${v}`);
     else if (k === 'q') out.push(`search "${v}"`);
@@ -166,8 +166,17 @@ function middleware(req, res, next) {
   requestCtx.run(ctx, next);
 }
 
-// sign-in / sign-out (outside requireAuth) and live feed connects (raw http request: no req.path)
+// sign-in / sign-out (outside requireAuth)
 const event = (req, { user, role, sid, status, action, detail }) =>
   write({ username: user, role, sid, ip: clientIp(req), method: req.method, path: req.path || req.url.split('?')[0], status, action, detail });
+
+// sessions ended by something else than the user's own Sign out: new sign-in elsewhere, Users page, disabled, password
+bus.on('revoked', (ids, reason, ended) => {
+  for (const s of ended || []) {
+    const by = s.by && s.by !== s.user && s.by !== 'new sign-in' ? ` by ${s.by}` : '';
+    write({ username: s.user, role: s.role, sid: s.sid, ip: s.ip, method: '-', path: '/session', status: 200,
+      action: 'Signed out', detail: `${reason || 'session ended'}${by}` });
+  }
+});
 
 module.exports = { middleware, event, nameOf, cleanQuery, viewDetail, changeDetail };

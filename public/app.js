@@ -1835,6 +1835,7 @@ PAGES.activity = async (main) => {
       <label>To<input type="date" name="to" value="${dayStr()}"></label>
       <label>User<select name="user"><option value="">All users</option></select></label>
       <label>Search<input name="q" placeholder="action, page, IP…"></label>
+      <label class="check reqOnly" style="align-self:center"><input type="checkbox" name="auth" value="1"> sign-in / sign-out only</label>
       <label class="check reqOnly" style="align-self:center"><input type="checkbox" name="writes" value="1"> changes only</label>
       <label class="check reqOnly" style="align-self:center"><input type="checkbox" name="failed" value="1"> refused / failed only</label>
       <div class="actions"><button class="btn primary">Search</button></div>
@@ -1842,7 +1843,7 @@ PAGES.activity = async (main) => {
     <div class="tw"><table><thead id="aHead"></thead><tbody id="aBody"></tbody></table></div>
     <div class="pager" id="aPager"></div></div>`;
   const f = $('#af'); let page = 1, tab = 'req', usersLoaded = false;
-  const qs = () => { const d = formData(f); if (!f.writes.checked) delete d.writes; if (!f.failed.checked) delete d.failed; return new URLSearchParams({ ...d, page }).toString(); };
+  const qs = () => { const d = formData(f); for (const k of ['auth', 'writes', 'failed']) if (!f[k].checked) delete d[k]; return new URLSearchParams({ ...d, page }).toString(); };
   const td = (v, st = '') => `<td style="${st}">${v}</td>`;
   const when = (r) => `<td class="mono" style="font-size:12px;white-space:nowrap" title="${fmtTime(r.at)}">${fmtShort(r.at)}</td>`;
   const load = async () => {

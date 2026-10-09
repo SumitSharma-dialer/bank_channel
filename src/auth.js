@@ -94,7 +94,8 @@ async function endSession(req, res) {
 }
 
 // Revoke sessions by id or by user (except one session, e.g. the admin's own; skipRole: leave users of that role
-// alone). Emits the ids so live WebSockets close.
+// alone). Emits the ids so live WebSockets close, and the ended sessions so the activity log notes each sign-out
+// (reason: why, e.g. 'user disabled'; by: who did it).
 const bus = new (require('events'))();
 async function revoke({ ids, user, except, skipRole, by, reason }) {
   const args = [by || null], where = ['revoked_at IS NULL', 'expires_at > now()'];
@@ -102,10 +103,10 @@ async function revoke({ ids, user, except, skipRole, by, reason }) {
   if (user) { args.push(user); where.push(`username = $${args.length}`); }
   if (except) { args.push(except); where.push(`id <> $${args.length}`); }
   if (skipRole) { args.push(skipRole); where.push(`username NOT IN (SELECT username FROM admins WHERE role = $${args.length})`); }
-  const r = await q(`UPDATE sessions SET revoked_at=now(), revoked_by=$1 WHERE ${where.join(' AND ')} RETURNING id`, args);
+  const r = await q(`UPDATE sessions SET revoked_at=now(), revoked_by=$1 WHERE ${where.join(' AND ')} RETURNING id, username, ip, (SELECT role FROM admins a WHERE a.username = sessions.username) AS role`, args);
   forget();
   const out = r.rows.map((x) => +x.id);
-  if (out.length) bus.emit('revoked', out, reason);
+  if (out.length) bus.emit('revoked', out, reason, r.rows.map((x) => ({ sid: +x.id, user: x.username, role: x.role, ip: x.ip, by })));
   return out;
 }
 

@@ -65,9 +65,11 @@ Sidebar → **Activity log**. Two tabs, both filtered by day range, user and fre
   viewed or changed** and IP. Viewed: the filters in words and the trunk / process opened
   (`2026-10-08 → 2026-10-09 · process beetel · number contains 98`). Changed: the object and each changed field
   (`trunk airtel: max channels 30 → 60`; passwords only show that they changed). Refused or failed requests show
-  `refused: <reason>` / `failed: <reason>`. Sign-in, sign-out, live feed connects (WebSocket `/ws`), failed
+  `refused: <reason>` / `failed: <reason>`. Sign-in, sign-out (own click, or ended by a new sign-in elsewhere,
+  from the Users page, by disabling / deleting the user, changing their role or password: the reason and who did it
+  are in the detail), failed
   sign-ins (wrong password / unknown user / disabled user) and blocked sign-ins (too many attempts) are logged too.
-  Filters **changes only** (non-GET) and **errors / denied only** (status ≥ 400).
+  Filters **sign-in / sign-out only**, **changes only** (non-GET) and **errors / denied only** (status ≥ 400).
   Not logged: timer refreshes the UI marks with `X-Poll: 1` (System resources, Processes connection status,
   Diagnostics auto-refresh), and repeats of the same GET from the same session within a minute.
 - **Changes**: the audit log (`audit_log`) with the saved values. It used to be on the System page; admins no longer

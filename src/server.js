@@ -54,7 +54,7 @@ app.post('/api/logout', wrap(async (req, res) => {
   await auth.endSession(req, res);
   if (a) {
     await audit(a.user, 'logout', 'admin', null, null);
-    activity.event(req, { user: a.user, role: a.role, sid: a.sid, status: 200, action: 'Signed out' });
+    activity.event(req, { user: a.user, role: a.role, sid: a.sid, status: 200, action: 'Signed out', detail: 'clicked Sign out' });
   }
   res.json({ ok: true });
 }));
@@ -101,7 +101,6 @@ const wss = new WebSocketServer({ noServer: true });
 server.on('upgrade', async (req, sock, head) => {
   const a = req.url.startsWith('/ws') ? await auth.authFromReq(req).catch(() => null) : null;
   if (!a || (a.role === 'viewer' && !a.tabs.includes('live'))) { sock.destroy(); return; }
-  activity.event(req, { user: a.user, role: a.role, sid: a.sid, status: 101, action: 'Connected live feed' });
   wss.handleUpgrade(req, sock, head, (ws) => { ws.auth = a; wss.emit('connection', ws); });
 });
 // each client gets only what its user may see (monitor-only users: their processes)

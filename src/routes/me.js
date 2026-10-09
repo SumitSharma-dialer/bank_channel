@@ -11,7 +11,7 @@ router.post('/password', wrap(async (req, res) => {
   const a = (await q('SELECT * FROM admins WHERE username=$1', [req.user])).rows[0];
   if (!a || !verifyPassword(cur, a.pass_hash)) throw new Bad('current password is wrong');
   await q('UPDATE admins SET pass_hash=$1 WHERE id=$2', [hashPassword(next), a.id]);
-  const ended = await revoke({ user: req.user, except: req.auth.sid, by: req.user });
+  const ended = await revoke({ user: req.user, except: req.auth.sid, by: req.user, reason: 'password changed' });
   await audit(req.user, 'password', 'admin', a.id, { otherSessionsEnded: ended.length });
   res.json({ ok: true, otherSessionsEnded: ended.length });
 }));

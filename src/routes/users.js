@@ -85,7 +85,7 @@ router.put('/:id', wrap(async (req, res) => {
     [u.id, b.full_name, b.role, b.processes, b.tabs, active]);
   auth.forget();   // new rights apply on the next request
   let ended = [];
-  if (!active || u.role !== b.role) ended = await auth.revoke({ user: u.username, by: req.user });   // disabled / role changed: sign out
+  if (!active || u.role !== b.role) ended = await auth.revoke({ user: u.username, by: req.user, reason: active ? 'role changed' : 'user disabled' });   // disabled / role changed: sign out
   await audit(req.user, 'user_update', 'admin', u.id, { username: u.username, changes, sessionsEnded: ended.length });
   res.json(pub(rows[0]));
 }));
@@ -95,7 +95,7 @@ router.post('/:id/password', wrap(async (req, res) => {
   mayManage(req, u);
   const pw = password(req.body.password);
   await q('UPDATE admins SET pass_hash=$2 WHERE id=$1', [u.id, auth.hashPassword(pw)]);
-  const ended = await auth.revoke({ user: u.username, except: u.username === req.user ? req.auth.sid : null, by: req.user });
+  const ended = await auth.revoke({ user: u.username, except: u.username === req.user ? req.auth.sid : null, by: req.user, reason: 'password reset' });
   await audit(req.user, 'user_password', 'admin', u.id, { username: u.username, sessionsEnded: ended.length });
   res.json({ ok: true, sessionsEnded: ended.length });
 }));
@@ -105,7 +105,7 @@ router.delete('/:id', wrap(async (req, res) => {
   if (u.username === req.user) throw new Bad('you cannot delete yourself');
   mayManage(req, u);
   if (u.role === 'superadmin' && u.active) await keepASuper(u.id);
-  await auth.revoke({ user: u.username, by: req.user });
+  await auth.revoke({ user: u.username, by: req.user, reason: 'user deleted' });
   await q('DELETE FROM admins WHERE id=$1', [u.id]);
   await audit(req.user, 'user_delete', 'admin', u.id, { username: u.username });
   res.json({ ok: true });
@@ -127,7 +127,7 @@ router.delete('/sessions/:sid', wrap(async (req, res) => {
   if (sid === req.auth.sid) throw new Bad('this is your own session — use Sign out');
   const owner = (await q('SELECT a.role FROM sessions s JOIN admins a ON a.username = s.username WHERE s.id=$1', [sid])).rows[0];
   mayManage(req, owner);
-  const ended = await auth.revoke({ ids: [sid], by: req.user });
+  const ended = await auth.revoke({ ids: [sid], by: req.user, reason: 'session signed out from Users page' });
   if (!ended.length) throw new Bad('session already ended');
   await audit(req.user, 'session_end', 'session', sid, null);
   res.json({ ok: true });
@@ -137,7 +137,7 @@ router.delete('/sessions/:sid', wrap(async (req, res) => {
 router.post('/sessions/end', wrap(async (req, res) => {
   const user = str(req.body.user, 64);
   if (user) mayManage(req, (await q('SELECT role FROM admins WHERE username=$1', [user])).rows[0]);
-  const ended = await auth.revoke({ user: user || undefined, except: req.auth.sid, by: req.user,
+  const ended = await auth.revoke({ user: user || undefined, except: req.auth.sid, by: req.user, reason: 'signed out from Users page',
     skipRole: auth.isSuper(req.auth) ? undefined : 'superadmin' });
   await audit(req.user, 'session_end_all', 'session', null, { user: user || '(all users)', ended: ended.length });
   res.json({ ok: true, ended: ended.length });
