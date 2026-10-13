@@ -17,6 +17,9 @@ const daysAgo = (n) => dayStr(new Date(Date.now() - n * 86400e3));
 // monitor-only users (role viewer, e.g. team leaders) see only their tabs and processes; the server enforces the same
 const isViewer = () => S.me && S.me.role === 'viewer';
 const isSuper = () => S.me && S.me.role === 'superadmin';
+// SIP engine in use (System → SIP engine): 'asterisk' | 'kamailio'
+const engineId = () => (S.snap && S.snap.engine) || (S.me && S.me.engine) || 'asterisk';
+const EN = () => (engineId() === 'kamailio' ? 'Kamailio' : 'Asterisk');
 // Activity log: super admins only
 const canSee = (page) => (page === 'activity' ? isSuper() : !isViewer() || (S.me.tabs || []).includes(page));
 const S = { me: null, tz: 'Asia/Kolkata', snap: null, trunks: [], processes: [], dispositions: [], feed: [], ws: null, page: null };
@@ -41,8 +44,8 @@ function toast(msg, bad) {
 }
 function applyToast(r, what) {
   const a = r && r.apply;
-  if (a && a.ok === false) toast(`${what} saved, but Asterisk reload failed: ${a.error}`, true);
-  else toast(`${what} saved — Asterisk updated`);
+  if (a && a.ok === false) toast(`${what} saved, but ${EN()} reload failed: ${a.error}`, true);
+  else toast(`${what} saved — ${EN()} updated`);
 }
 
 const DISP_CLASS = { ANSWERED: 'ok', BUSY: 'warn', NO_ANSWER: 'warn', CANCEL: '', CONGESTION: 'bad', FAILED: 'bad',
@@ -141,7 +144,8 @@ function issueBadge(i) {
 function setConn(ari) {
   const c = $('#conn');
   c.className = 'conn ' + (ari === true ? 'ok' : ari === false ? 'bad' : '');
-  c.lastElementChild.textContent = ari === true ? 'Asterisk ARI connected' : ari === false ? 'ARI disconnected' : 'live feed offline';
+  const k = engineId() === 'kamailio';
+  c.lastElementChild.textContent = ari === true ? (k ? 'Kamailio connected' : 'Asterisk ARI connected') : ari === false ? (k ? 'Kamailio not responding' : 'ARI disconnected') : 'live feed offline';
 }
 
 // ------------------------------------------------------------------ router
@@ -198,7 +202,7 @@ const Live = {
     if (s.viewer) $('#kPeak').nextElementSibling.textContent = 'sum of your process peaks';
     const up = s.trunks.filter((t) => t.active && t.state === 'online').length;
     $('#kTr').innerHTML = `${up}<small> / ${s.trunks.filter((t) => t.active).length}</small>`;
-    $('#kTrS').textContent = s.ariConnected ? 'qualify status from Asterisk' : 'Asterisk not connected';
+    $('#kTrS').textContent = s.ariConnected ? `qualify status from ${EN()}` : `${EN()} not connected`;
 
     $('#lvP').innerHTML = s.processes.length ? s.processes.map((x) => `<tr>
       <td class="t-name"><b>${esc(x.name)}</b><small>${esc(x.code)}${s.viewer ? '' : ` → ${esc(x.trunk || 'no trunk')}`}${x.active ? '' : ' · inactive'}</small></td>
@@ -518,7 +522,7 @@ function regChip(p, st) {
     const up = r.filter((x) => x.status === 'Avail');
     if (up.length) return `<span class="chip ok" title="Online — answers our SIP OPTIONS ping\n${esc(tip)}">online</span><br><small class="mono">${esc(up[0].ip)}:${up[0].port}${up[0].rtt != null ? ` · ${up[0].rtt} ms` : ''}</small>`;
     if (r.some((x) => x.status === 'Unavail')) return `<span class="chip bad" title="Offline — ${esc(tip)}\nThe customer server does not answer SIP OPTIONS (down, firewall, or it ignores OPTIONS). Calls are not affected by this check.">offline</span>`;
-    return `<span class="chip" title="Asterisk pings every 60 s — wait a minute">checking…</span>`;
+    return `<span class="chip" title="The SIP engine pings every 60 s — wait a minute">checking…</span>`;
   }
   const c = st.registered[p.code];
   if (!c) return `<span class="chip bad" title="Offline — ${p.active ? 'the customer server has not registered (or its registration expired)' : 'Process inactive'}">offline</span>`;
@@ -1157,7 +1161,7 @@ PAGES.dispositions = async (main) => {
 
 // =================================================================== DIAGNOSTICS
 const Diag = { tab: 'issues', timer: null, names: {} };
-const DIAG_TABS = [['issues', 'Issues'], ['reg', 'Registrations'], ['sip', 'SIP trace'], ['rtp', 'RTP / audio'], ['pcap', 'Packet capture'], ['log', 'Asterisk log'], ['lookup', 'Call lookup']];
+const DIAG_TABS = [['issues', 'Issues'], ['reg', 'Registrations'], ['sip', 'SIP trace'], ['rtp', 'RTP / audio'], ['pcap', 'Packet capture'], ['log', 'Engine log'], ['lookup', 'Call lookup']];
 const ago = (ms) => fmtDur(Math.max(0, Math.round((Date.now() - ms) / 1000)));
 const durBetween = (a, b) => fmtDur(Math.max(0, Math.round((new Date(b) - new Date(a)) / 1000)));
 // ip[:port] -> "trunk x" / "proc y" / "SIPDist"
@@ -1171,7 +1175,7 @@ function diagPoll(fn, ms) {
 PAGES.diag = async (main) => {
   const want = (location.hash.split('?')[1] || '').replace(/^tab=/, '');
   if (DIAG_TABS.some(([k]) => k === want)) Diag.tab = want;
-  main.innerHTML = `<div class="head"><div><h1>Diagnostics</h1><p>Find SIP and call problems: open issues, live SIP trace (like sngrep), RTP / audio quality, tcpdump capture, Asterisk log.</p></div></div>
+  main.innerHTML = `<div class="head"><div><h1>Diagnostics</h1><p>Find SIP and call problems: open issues, live SIP trace (like sngrep), RTP / audio quality, tcpdump capture, ${EN()} log.</p></div></div>
     <div class="tabs big" id="dTabs">${DIAG_TABS.map(([k, l]) => `<button data-t="${k}">${l}</button>`).join('')}</div><div id="dBodyMain"></div>`;
   try {
     const [tr, pr] = await Promise.all([api('GET', '/api/trunks'), api('GET', '/api/processes')]);
@@ -1608,7 +1612,7 @@ DiagTab.lookup = async (el) => {
       <div class="panel" style="margin-bottom:14px"><h2>SIP dialogs in the trace buffer <span class="chip">${sip ? sip.dialogs.length : 0}</span></h2><div class="body">
         ${sip && sip.dialogs.length ? sip.dialogs.slice(0, 30).map((g) => `<div class="cmd"><a href="#" data-flow="${esc(g.callId)}" class="mono">${esc(clock(g.start))} ${esc(g.method)} ${esc(g.from)} → ${esc(g.to)}</a> <span class="chip ${STATE_CLS[g.state] || ''}">${esc(g.state)}${g.code && g.state === 'REJECTED' ? ' ' + g.code : ''}</span></div>`).join('')
         : `<p class="hint">Nothing captured for this. Start a SIP trace on the <a href="#/diag?tab=sip">SIP trace</a> tab, then have the call placed again.</p>`}</div></div>
-      <div class="panel"><h2>Asterisk log lines <span class="chip">${log ? log.lines.length : 0}</span></h2><div class="body"><pre class="code logbox">${log && log.lines.length ? log.lines.map((l) => esc(l)).join('\n') : 'No matching log lines.'}</pre></div></div>`;
+      <div class="panel"><h2>${EN()} log lines <span class="chip">${log ? log.lines.length : 0}</span></h2><div class="body"><pre class="code logbox">${log && log.lines.length ? log.lines.map((l) => esc(l)).join('\n') : 'No matching log lines.'}</pre></div></div>`;
     $$('#clOut [data-flow]').forEach((a) => (a.onclick = (ev) => { ev.preventDefault(); Diag.tab = 'sip'; location.hash = '#/diag?tab=sip'; setTimeout(() => flow(a.dataset.flow), 400); }));
   });
 };
@@ -1890,20 +1894,28 @@ PAGES.activity = async (main) => {
 
 // =================================================================== SYSTEM
 PAGES.system = async (main) => {
-  main.innerHTML = `<div class="head"><div><h1>System</h1><p>Server resources, health, generated Asterisk config and Asterisk views. Live Asterisk CLI log: <a href="#/diag?tab=log">Diagnostics → Asterisk log</a>.</p></div>
-    <div class="actions"><button class="btn" id="reapply">Re-apply config to Asterisk</button></div></div>
-    <div class="panel" style="margin-bottom:14px"><h2>Server resources <small id="resInfo" style="font-weight:400;color:var(--ink-3);font-size:12.5px"></small></h2><div class="body"><div class="grid kpis" id="res" style="margin-bottom:0">Loading…</div></div></div>
-    <div class="panel" style="margin-bottom:14px"><h2>Health</h2><div class="body"><div class="health" id="health">Loading…</div></div></div>
-    <div class="panel" style="margin-bottom:14px"><h2>Where the UI meets Asterisk</h2><div class="body"><div class="tw"><table>
-      <thead><tr><th>UI action</th><th>Backend</th><th>Asterisk</th></tr></thead><tbody>
+  const kam = engineId() === 'kamailio';
+  const meets = kam ? `
+      <tr><td>Add / edit / (de)activate trunk</td><td><code>trunks</code> table → <code>kamailio/render.js</code></td><td><code>/etc/kamailio/sipdist/data.lua</code> (+ <code>dispatcher.list</code>, <code>dbtext/uacreg</code>) → RPC <code>app_lua.reload</code>, <code>dispatcher.reload</code>, <code>uac.reg_reload</code></td></tr>
+      <tr><td>Add / edit process, change limit</td><td><code>processes</code> table</td><td><code>data.lua</code>, read by <code>sipdist.lua</code> (limits = dialog profiles <code>sdproc</code> / <code>sdtrunk</code>) → RPC <code>app_lua.reload</code>, no restart</td></tr>
+      <tr><td>Live dashboard</td><td>Redis list <code>sd:kam:ev</code> → Redis counters → <code>/ws</code></td><td><code>start</code> / <code>end</code> events from <code>sipdist.lua</code>, reconciled from Kamailio's own count every 10 s</td></tr>
+      <tr><td>CDR & daily stats</td><td><code>calls</code> + <code>daily_stats</code></td><td><code>end</code> event of every call (answered, failed, cancelled, refused)</td></tr>
+      <tr><td>Audio (RTP)</td><td>—</td><td><code>rtpengine</code> relays the audio of every call (ports as in rtp.conf)</td></tr>` : `
       <tr><td>Add / edit / (de)activate trunk</td><td><code>trunks</code> table → <code>render.js</code></td><td><code>/etc/asterisk/sipdist/trunks.conf</code> → ARI <code>PUT /asterisk/modules/res_pjsip.so</code></td></tr>
       <tr><td>Add / edit process, change limit</td><td><code>processes</code> table</td><td><code>processes.conf</code> (endpoint/auth/identify) + <code>dialplan.conf</code> (<code>proc-&lt;code&gt;</code>, GROUP_COUNT limit) → reload res_pjsip + pbx_config</td></tr>
       <tr><td>Live dashboard</td><td>ARI events WS → Redis counters → <code>/ws</code></td><td><code>ChannelCreated</code> / <code>ChannelDestroyed</code>, reconciled from <code>GET /ari/channels</code> every 10 s</td></tr>
-      <tr><td>CDR & daily stats</td><td><code>calls</code> + <code>daily_stats</code></td><td>hangup handler <code>sd-hangup</code> → <code>UserEvent(SIPDIST_END)</code>; backup in <code>cdr</code> via cdr_pgsql</td></tr>
+      <tr><td>CDR & daily stats</td><td><code>calls</code> + <code>daily_stats</code></td><td>hangup handler <code>sd-hangup</code> → <code>UserEvent(SIPDIST_END)</code>; backup in <code>cdr</code> via cdr_pgsql</td></tr>`;
+  main.innerHTML = `<div class="head"><div><h1>System</h1><p>Server resources, health, SIP engine, generated ${EN()} config and ${EN()} views. Live ${EN()} log: <a href="#/diag?tab=log">Diagnostics → Engine log</a>.</p></div>
+    <div class="actions"><button class="btn" id="reapply">Re-apply config to ${EN()}</button></div></div>
+    <div class="panel" style="margin-bottom:14px"><h2>Server resources <small id="resInfo" style="font-weight:400;color:var(--ink-3);font-size:12.5px"></small></h2><div class="body"><div class="grid kpis" id="res" style="margin-bottom:0">Loading…</div></div></div>
+    <div class="panel" style="margin-bottom:14px"><h2>Health</h2><div class="body"><div class="health" id="health">Loading…</div></div></div>
+    <div class="panel" style="margin-bottom:14px"><h2>SIP engine</h2><div class="body" id="engine">Loading…</div></div>
+    <div class="panel" style="margin-bottom:14px"><h2>Where the UI meets ${EN()}</h2><div class="body"><div class="tw"><table>
+      <thead><tr><th>UI action</th><th>Backend</th><th>${EN()}</th></tr></thead><tbody>${meets}
       </tbody></table></div></div></div>
     <div class="grid two" style="margin-bottom:14px">
       <div class="panel"><h2>Generated config</h2><div class="body"><div class="tabs" id="cfgTabs"></div><pre class="code" id="cfgCode">Loading…</pre></div></div>
-      <div class="panel"><h2>Asterisk CLI (read-only)</h2><div class="body"><div class="tabs" id="cliTabs">
+      <div class="panel"><h2>${EN()} ${kam ? 'views' : 'CLI'} (read-only)</h2><div class="body"><div class="tabs" id="cliTabs">
         ${['endpoints', 'registrations', 'contacts', 'groups', 'channels', 'channelstats', 'transports', 'qualify', 'rtp'].map((x, i) => `<button data-cli="${x}" class="${i ? '' : 'on'}">${x}</button>`).join('')}</div><pre class="code" id="cliOut">…</pre></div></div>
     </div>
     <div class="grid two">
@@ -1916,9 +1928,41 @@ PAGES.system = async (main) => {
     const h = await api('GET', '/api/system/health');
     const box = (lab, ok, v) => `<div class="hbox"><div class="lab">${lab}</div><div class="v"><span class="chip ${ok ? 'ok' : 'bad'}">${ok ? 'OK' : 'DOWN'}</span> ${esc(v || '')}</div></div>`;
     const a = h.apply || {};
-    $('#health').innerHTML = box('Asterisk', h.asterisk && !h.asterisk.error, h.asterisk && (h.asterisk.version || h.asterisk.error)) +
-      box('ARI events', h.ari, h.ari ? 'subscribed' : 'reconnecting') + box('PostgreSQL', h.db, h.dbError) + box('Redis', h.redis, h.redisError) +
+    $('#health').innerHTML = box(h.engineLabel || 'Asterisk', h.asterisk && !h.asterisk.error, h.asterisk && (h.asterisk.version || h.asterisk.error)) +
+      box(h.engine === 'kamailio' ? 'Call events' : 'ARI events', h.ari, h.ari ? (h.engine === 'kamailio' ? 'receiving' : 'subscribed') : (h.engine === 'kamailio' ? 'Kamailio is not reporting' : 'reconnecting')) + box('PostgreSQL', h.db, h.dbError) + box('Redis', h.redis, h.redisError) +
       `<div class="hbox"><div class="lab">Last config apply</div><div class="v"><span class="chip ${a.ok ? 'ok' : a.ok === false ? 'bad' : ''}">${a.ok ? 'OK' : a.ok === false ? 'FAILED' : '—'}</span> <span style="font-weight:400;font-size:12.5px">${a.at ? fmtTime(a.at) : ''} ${esc(a.error || '')}</span></div></div>`;
+  };
+  // SIP engine: one of Asterisk / Kamailio carries every call, the other is stopped. Super admins switch it here.
+  const engine = async () => {
+    const e = await api('GET', '/api/system/engine');
+    const svc = (id) => Object.entries(e.services[id] || {}).map(([n, st]) => `<span class="chip ${st === 'active' ? 'ok' : ''}" title="systemctl is-active ${esc(n)}">${esc(n)}: ${esc(st)}</span>`).join(' ');
+    const about = { asterisk: 'Handles SIP and audio itself (PJSIP). Converts between codecs, paces calls over the trunk CPS limit.',
+      kamailio: 'SIP proxy for high call volume; the audio goes through rtpengine. Calls over the trunk CPS limit are refused at once.' };
+    const card = (id) => {
+      const on = e.engine === id, name = e.engines[id];
+      const btn = !e.canSwitch ? '' : on
+        ? `<button class="btn" data-engine="${id}" ${e.switching ? 'disabled' : ''}>Restart ${esc(name)}</button>`
+        : `<button class="btn primary" data-engine="${id}" ${e.switching ? 'disabled' : ''}>Switch to ${esc(name)}</button>`;
+      return `<div class="hbox" style="${on ? 'border-color:var(--ok, #16a34a)' : ''}"><div class="lab">${esc(name)} ${on ? '<span class="chip ok">in use</span>' : '<span class="chip">stopped</span>'}</div>
+        <div class="v" style="font-weight:400;font-size:12.5px">${about[id]}</div><div style="margin-top:8px">${svc(id)}</div><div style="margin-top:10px">${btn}</div></div>`;
+    };
+    const last = e.lastSwitch ? `<p class="hint" style="margin-top:10px">Last switch: ${esc(e.engines[e.lastSwitch.to] || e.lastSwitch.to)} by ${esc(e.lastSwitch.by || '')} · ${fmtTime(e.lastSwitch.at)} · ${e.lastSwitch.ok ? 'done' : `<b>failed</b>: ${esc(e.lastSwitch.message)}`}</p>` : '';
+    $('#engine').innerHTML = `<div class="health">${card('asterisk')}${card('kamailio')}</div>
+      <p class="hint" style="margin-top:10px">All processes run on the engine in use; the other one is stopped and does not start at boot. ${e.canSwitch ? 'Switching stops one and starts the other: <b>every live call is dropped</b>, so do it at a quiet time. Trunks, processes, DIDs, reports and the live monitor stay as they are.' : 'Only a super admin can switch the engine.'}</p>
+      ${e.restartNeeded ? '<p class="err">Kamailio settings changed (app update or .env) — restart Kamailio here at a quiet time to load them.</p>' : ''}${e.switching ? `<p class="err">Switching to ${esc(e.engines[e.switching.to])}…</p>` : ''}${last}`;
+    $$('#engine [data-engine]').forEach((b) => (b.onclick = async () => {
+      const to = b.dataset.engine, name = e.engines[to], same = to === e.engine;
+      if (!(await confirmBox(same ? `Restart ${name}` : `Switch to ${name}`, same
+        ? `Restart <b>${esc(name)}</b>? Every live call is dropped.`
+        : `Stop <b>${esc(e.engines[e.engine])}</b> and run every process on <b>${esc(name)}</b>?<br>Every live call is dropped. If ${esc(name)} does not start, ${esc(e.engines[e.engine])} is started again.`, same ? 'Restart' : 'Switch'))) return;
+      $$('#engine [data-engine]').forEach((x) => (x.disabled = true)); b.textContent = same ? 'Restarting…' : 'Switching…';
+      try {
+        await api('POST', '/api/system/engine', { engine: to, confirm: true });
+        if (S.me) S.me.engine = to; if (S.snap) S.snap.engine = to;
+        toast(same ? `${name} restarted` : `Now running on ${name}`);
+        PAGES.system(main);
+      } catch (er) { toast(`${same ? 'Restart' : 'Switch'} failed: ${er.message}`, true); engine().catch(() => {}); health().catch(() => {}); }
+    }));
   };
   // CPU / RAM / storage tiles; meter turns amber at 80 %, red at 95 %
   const gb = (b) => (b >= 1e12 ? `${(b / 1e12).toFixed(2)} TB` : `${(b / 1e9).toFixed(1)} GB`);
@@ -1930,7 +1974,7 @@ PAGES.system = async (main) => {
     const c = r.cpu, m = r.memory, d = Math.floor(r.uptime / 86400), h = Math.floor((r.uptime % 86400) / 3600);
     $('#resInfo').textContent = `· ${r.hostname} · up ${d ? d + 'd ' : ''}${h}h · ${c.cores} cores ${c.model}`;
     $('#res').innerHTML =
-      tile('CPU', c.percent, `load ${c.load.join(' / ')} (1 / 5 / 15 min, ${c.cores} cores)${c.asterisk != null ? ` · Asterisk ${c.asterisk}%` : ''}`, 'cpu', 'CPU') +
+      tile('CPU', c.percent, `load ${c.load.join(' / ')} (1 / 5 / 15 min, ${c.cores} cores)${c.asterisk != null ? ` · ${c.engine || 'Asterisk'} ${c.asterisk}%` : ''}`, 'cpu', 'CPU') +
       tile('RAM', pct(m.used, m.total), `${gb(m.used)} used of ${gb(m.total)} · ${gb(m.available)} free${m.swapTotal ? ` · swap ${gb(m.swapUsed)} / ${gb(m.swapTotal)}` : ''}`, 'mem', 'RAM') +
       r.disks.map((x) => tile(`Storage <span class="mono" style="text-transform:none;letter-spacing:0">${esc(x.mount)}</span>`, pct(x.used, x.total),
         `${gb(x.used)} used of ${gb(x.total)} · ${gb(x.available)} free <span class="mono" style="color:var(--ink-3)" title="${esc(x.device)}">${esc(x.fstype)}</span>`, `disk:${x.mount}`, `Storage ${x.mount}`)).join('');
@@ -1961,7 +2005,7 @@ PAGES.system = async (main) => {
     e.preventDefault(); $('#pwErr').textContent = '';
     try { const r = await api('POST', '/api/me/password', formData(e.target)); e.target.reset(); toast(`Password changed${r.otherSessionsEnded ? ` · ${r.otherSessionsEnded} other session(s) signed out` : ''}`); } catch (er) { $('#pwErr').textContent = er.message; }
   });
-  resources().catch((e) => ($('#res').textContent = e.message)); health().catch(() => {}); cfg().catch((e) => ($('#cfgCode').textContent = e.message)); cli('endpoints');
+  resources().catch((e) => ($('#res').textContent = e.message)); health().catch(() => {}); engine().catch((e) => ($('#engine').textContent = e.message)); cfg().catch((e) => ($('#cfgCode').textContent = e.message)); cli('endpoints');
 };
 
 boot();

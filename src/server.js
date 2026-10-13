@@ -10,7 +10,7 @@ const scope = require('./scope');
 const activity = require('./activity');
 const tracker = require('./tracker');
 const issues = require('./diag/issues');
-const { apply } = require('./asterisk/apply');
+const engine = require('./engine');
 const { wrap, str } = require('./routes/util');
 
 const app = express();
@@ -61,7 +61,7 @@ app.post('/api/logout', wrap(async (req, res) => {
 app.get('/api/me', wrap(async (req, res) => {
   const a = await auth.authFromReq(req);
   if (!a) return res.status(401).json({ error: 'login required' });
-  const me = { user: a.user, role: a.role, publicIp: cfg.publicIp, sipPort: cfg.sipPort, tz: cfg.statsTz };
+  const me = { user: a.user, role: a.role, publicIp: cfg.publicIp, sipPort: cfg.sipPort, tz: cfg.statsTz, engine: engine.name() };
   if (a.role === 'viewer') {
     Object.assign(me, { tabs: a.tabs, publicIp: undefined, sipPort: undefined,
       processes: (await q('SELECT code, name FROM processes WHERE code = ANY($1) ORDER BY code', [a.processes])).rows });
@@ -70,7 +70,7 @@ app.get('/api/me', wrap(async (req, res) => {
 }));
 
 // ---- protected API
-app.use('/internal', require('./routes/internal'));   // Asterisk on localhost (dialplan CURL)
+app.use('/internal', require('./routes/internal'));   // the SIP engine on localhost (inbound DID routing)
 app.use('/api', auth.requireAuth);
 app.use('/api', activity.middleware);   // activity log (Activity page, super admins)
 app.use('/api', scope.guard);   // monitor-only users: only their tabs, read-only
@@ -128,11 +128,12 @@ auth.bus.on('revoked', (ids, reason) => { for (const c of wss.clients) if (c.aut
 
 (async () => {
   await auth.ensureAdmin();
+  await engine.load();   // Asterisk or Kamailio (System → SIP engine)
   tracker.start();
   issues.start();
   require('./sysinfo').startHistory();   // CPU / RAM / storage every minute, kept 5 days (System page graphs)
   require('./retention').start();   // delete DB history older than RETENTION_DAYS (5)
-  apply('startup');   // make Asterisk config match the DB on every boot
+  engine.apply('startup');   // make the SIP engine's config match the DB on every boot
   server.listen(cfg.http.port, cfg.http.host, () =>
     console.log(`[http] SIP Channel Distributor UI on http://${cfg.http.host}:${cfg.http.port}`));
 })().catch((e) => { console.error('startup failed:', e); process.exit(1); });

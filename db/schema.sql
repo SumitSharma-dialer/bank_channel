@@ -593,4 +593,12 @@ INSERT INTO dispositions(code,label,source,sip_code,sort,custom_code) VALUES
   ('SIP_DOWN',      'SIP down / unreachable',         'trunk',       503, 15, '')
 ON CONFLICT (code) DO UPDATE SET source=EXCLUDED.source, sort=EXCLUDED.sort;
 
+-- App-wide settings. sip_engine = which SIP engine carries the calls: 'asterisk' | 'kamailio' (src/engine.js)
+CREATE TABLE IF NOT EXISTS app_settings (
+  key         TEXT PRIMARY KEY,
+  value       TEXT NOT NULL,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+INSERT INTO app_settings(key, value) VALUES ('sip_engine', 'asterisk') ON CONFLICT (key) DO NOTHING;
+
 COMMIT;

@@ -32,8 +32,9 @@ const source = {};   // field -> 'ui' when it comes from alert_settings
 
 // Alert types = issue key prefixes from src/diag/issues.js
 const TYPES = [
-  { type: 'ari_down', severity: 'critical', label: 'Asterisk ARI disconnected', about: 'Live counters and CDR stop.' },
-  { type: 'apply_failed', severity: 'critical', label: 'Config apply to Asterisk failed', about: 'Last trunk / process change did not reach Asterisk.' },
+  { type: 'ari_down', severity: 'critical', label: 'SIP engine not responding', about: 'Asterisk ARI disconnected / Kamailio down: live counters and CDR stop.' },
+  { type: 'apply_failed', severity: 'critical', label: 'Config apply to the SIP engine failed', about: 'Last trunk / process change did not reach Asterisk / Kamailio.' },
+  { type: 'engine_restart', severity: 'warning', label: 'Kamailio restart needed', about: 'kamailio.cfg changed (app update or .env).' },
   { type: 'redis_down', severity: 'critical', label: 'Redis not reachable', about: 'Channel counting is down.' },
   { type: 'sip_down', severity: 'critical', label: 'SIP trunk down', about: 'Trunk does not answer SIP OPTIONS.' },
   { type: 'reg', severity: 'critical', label: 'Trunk not registered', about: 'Carrier rejects the registration.' },

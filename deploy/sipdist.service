@@ -1,6 +1,6 @@
 [Unit]
-Description=SIP Channel Distributor (API + UI + ARI tracker)
-After=network-online.target postgresql.service redis-server.service redis.service asterisk.service
+Description=SIP Channel Distributor (API + UI + call tracker)
+After=network-online.target postgresql.service redis-server.service redis.service asterisk.service kamailio.service
 Wants=network-online.target
 
 [Service]
@@ -18,7 +18,8 @@ LimitNOFILE=65536
 AmbientCapabilities=CAP_NET_RAW
 NoNewPrivileges=true
 ProtectSystem=full
-ReadWritePaths=/etc/asterisk/sipdist
+# config of the second SIP engine (Kamailio); engine switch requests go to /var/lib/sipdist
+ReadWritePaths=/etc/asterisk/sipdist /etc/kamailio/sipdist
 
 [Install]
 WantedBy=multi-user.target

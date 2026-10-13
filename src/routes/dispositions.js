@@ -5,7 +5,7 @@ const router = require('express').Router();
 const { q, pool, audit } = require('../db');
 const { CAUSE_STATUSES, CAUSE_TARGETS } = require('../disposition');
 const tracker = require('../tracker');
-const { apply } = require('../asterisk/apply');
+const { apply } = require('../engine');
 const { SIP_CAUSE } = require('../asterisk/render');
 const { Bad, wrap, str, int, diff } = require('./util');
 

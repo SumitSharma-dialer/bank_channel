@@ -37,14 +37,15 @@ async function renderAll() {
   };
 }
 
-async function doApply(reason) {
+// opts.reload false = only write the files (Asterisk is stopped and reads them when it starts: engine switch)
+async function doApply(reason, opts = {}) {
   const files = await renderAll();
   await fs.mkdir(cfg.asterisk.confDir, { recursive: true });
   for (const [name, text] of Object.entries(files)) {
     await writeAtomic(path.join(cfg.asterisk.confDir, name), text);
   }
   const reloaded = [];
-  if (cfg.asterisk.reload) {
+  if (cfg.asterisk.reload && opts.reload !== false) {
     // pjsip: endpoints, auths, aors, identifies, registrations. pbx_config: dialplan.
     for (const mod of ['res_pjsip.so', 'res_pjsip_outbound_registration.so', 'pbx_config.so']) {
       try { await ari.reloadModule(mod); reloaded.push(mod); }
@@ -57,8 +58,8 @@ async function doApply(reason) {
 }
 
 // Serialised: two UI saves at once never interleave file writes / reloads.
-function apply(reason = 'manual') {
-  const p = chain.then(() => doApply(reason)).catch((e) => {
+function apply(reason = 'manual', opts) {
+  const p = chain.then(() => doApply(reason, opts)).catch((e) => {
     last = { at: new Date().toISOString(), ok: false, error: e.message, reloaded: [], reason };
     console.error('[apply] failed:', e.message);
     return last;

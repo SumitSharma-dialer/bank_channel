@@ -17,6 +17,20 @@ module.exports = {
     reload: env.ASTERISK_RELOAD !== '0',
     log: env.ASTERISK_LOG || '/var/log/asterisk/full',   // logger.conf full => notice,warning,error,verbose(3),dtmf (= CLI output)
   },
+  // second SIP engine (System page → SIP engine). Only one of Asterisk / Kamailio runs at a time.
+  kamailio: {
+    confDir: env.KAMAILIO_CONF_DIR || '/etc/kamailio/sipdist',
+    listenIp: env.KAMAILIO_LISTEN_IP || '',        // '' = this server's main IPv4 address
+    advertiseIp: env.KAMAILIO_ADVERTISE_IP || '',  // set only when SIP / RTP must show another (public) address
+    rpcPort: +(env.KAMAILIO_RPC_PORT || 5065),     // JSON-RPC over HTTP on 127.0.0.1
+    ngPort: +(env.RTPENGINE_NG_PORT || 2223),      // rtpengine control port on 127.0.0.1
+    children: +(env.KAMAILIO_CHILDREN || 16),
+    evKey: env.KAMAILIO_EVENT_KEY || 'sd:kam:ev',  // Redis list: call events Kamailio -> src/tracker.js
+    sizesKey: env.KAMAILIO_SIZES_KEY || 'sd:kam:sizes',
+    reload: env.KAMAILIO_RELOAD !== '0',
+  },
+  // engine switch requests for the root helper (deploy/sipdist-engine.sh)
+  stateDir: env.SIPDIST_STATE_DIR || '/var/lib/sipdist',
   // RTP port range of rtp.conf (used by the Diagnostics RTP capture)
   rtp: { start: +(env.RTP_START || 10000), end: +(env.RTP_END || 30000) },
   db: {

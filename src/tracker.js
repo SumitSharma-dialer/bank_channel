@@ -1,10 +1,14 @@
 'use strict';
-// ARI events -> Redis live counters -> PostgreSQL calls + daily_stats -> WebSocket.
+// Call events -> Redis live counters -> PostgreSQL calls + daily_stats -> WebSocket.
+// Asterisk: ARI events. Kamailio: events sipdist.lua pushes to a Redis list (see "Kamailio" below).
 const { EventEmitter } = require('events');
 const { execFile } = require('child_process');
 const cfg = require('./config');
 const redis = require('./redis');
 const ari = require('./ari');
+const engine = require('./engine');
+const kam = require('./kamailio/status');
+const { kamCall } = require('./kamailio/events');
 const { q } = require('./db');
 const { disposition, setRules } = require('./disposition');
 
@@ -21,9 +25,10 @@ async function refreshMeta() {
   const [p, t] = await Promise.all([
     q(`SELECT p.id,p.code,p.name,p.channel_limit,p.active,p.trunk_id,t.name AS trunk_name
          FROM processes p LEFT JOIN trunks t ON t.id=p.trunk_id ORDER BY p.code`),
-    q('SELECT id,name,max_channels,active,register,host FROM trunks ORDER BY name'),
+    q('SELECT id,name,max_channels,active,register,host,port,transport,username FROM trunks ORDER BY name'),
   ]);
   meta = { processes: p.rows, trunks: t.rows };
+  kamTrunks = t.rows;
   // hangup cause rules (Dispositions page); a missing table (db:init not run yet) keeps the defaults
   const r = await q('SELECT cause,status,disposition FROM cause_rules').catch(() => null);
   if (r) setRules(r.rows);
@@ -74,6 +79,7 @@ async function onDestroyed(ch) {
 
 // Every 10 s: rebuild counters from Asterisk's real channel list (self-healing).
 async function reconcile() {
+  if (engine.name() === 'kamailio') return reconcileKam();
   if (!ari.connected) return;
   let chans;
   try { chans = await ari.channels(); } catch (e) { return; }
@@ -158,9 +164,86 @@ async function flushPeaks() {
   }
 }
 
+// ------------------------------------------------------------- Kamailio
+// sipdist.lua pushes one JSON per event to the Redis list cfg.kamailio.evKey:
+//   start  the call was sent on to the trunk / process (it now holds a channel on both)
+//   end    the call is over: answered and hung up, failed, cancelled, or refused by the distributor (no start before)
+// and every 3 s the real number of calls per process / trunk to cfg.kamailio.sizesKey (reconcile).
+let kamTrunks = [];       // trunks with what kamailio/status needs to match registrations
+let kamSeen = 0;          // last time Kamailio wrote its sizes (ms) = it is alive
+const connected = () => (engine.name() === 'kamailio' ? Date.now() - kamSeen < 25000 : ari.connected);
+
+async function countHit(code, number) {
+  const day = today(), b = bucket();
+  await redis.multi()
+    .incr(`sd:hits:${code}:${b}`).expire(`sd:hits:${code}:${b}`, 3600)
+    .hincrby(`sd:hitsday:${day}`, code, 1).expire(`sd:hitsday:${day}`, 259200)
+    .exec();
+  bus.emit('hit', { process: code, at: Date.now(), number });
+}
+
+async function onKamEvent(ev) {
+  if (!ev || !ev.id) return;
+  const key = `sd:ch:k:${ev.id}`;
+  if (ev.e === 'start') {
+    if (!(await redis.set(key, `${ev.proc || ''}|${ev.trunk || ''}`, 'EX', 86400, 'NX'))) return;
+    const day = today();
+    if (ev.proc) {
+      await redis.sdIncr('sd:live:proc', `sd:peak:proc:${day}`, ev.proc);
+      await raisePeakAll(day, await redis.hincrby('sd:live:all', 'all', 1));
+      await countHit(ev.proc, ev.num);
+    }
+    if (ev.trunk) await redis.sdIncr('sd:live:trunk', `sd:peak:trunk:${day}`, ev.trunk);
+    return;
+  }
+  if (ev.e !== 'end') return;
+  const v = await redis.getdel(key).catch(() => null);
+  if (v) {
+    const [proc, trunk] = v.split('|');
+    if (proc) { await redis.sdDecr('sd:live:proc', proc); await redis.sdDecr('sd:live:all', 'all'); }
+    if (trunk) await redis.sdDecr('sd:live:trunk', trunk);
+  } else if (!ev.live && ev.dir !== 'in' && ev.proc) {
+    await countHit(ev.proc, ev.num);   // refused before it was sent on: still a hit of the process
+  }
+  await saveCall(kamCall(ev));
+}
+
+// Kamailio's own count is the truth: overwrite the live counters with it
+async function reconcileKam() {
+  let s = null;
+  try { s = JSON.parse(await redis.get(cfg.kamailio.sizesKey)); } catch { /* not written yet */ }
+  if (s && s.at) kamSeen = s.at * 1000;
+  const fresh = !!(s && s.at) && Date.now() - s.at * 1000 < 15000;
+  const proc = {}, trunk = {};
+  for (const p of meta.processes) proc[p.code] = fresh ? +(s.proc || {})[p.code] || 0 : 0;
+  for (const t of meta.trunks) trunk[t.name] = fresh ? +(s.trunk || {})[t.name] || 0 : 0;
+  const m = redis.multi().del('sd:live:proc', 'sd:live:trunk');
+  if (Object.keys(proc).length) m.hset('sd:live:proc', proc);
+  if (Object.keys(trunk).length) m.hset('sd:live:trunk', trunk);
+  m.hset('sd:live:all', 'all', Object.values(proc).reduce((a, b) => a + b, 0));
+  await m.exec();
+}
+
+// own Redis connection: BLPOP blocks it
+function consumeKam() {
+  const sub = redis.duplicate();
+  sub.on('error', () => {});
+  (async function loop() {
+    for (;;) {
+      try {
+        const r = await sub.blpop(cfg.kamailio.evKey, 5);
+        if (!r) continue;
+        let ev; try { ev = JSON.parse(r[1]); } catch { continue; }
+        await onKamEvent(ev).catch((x) => console.error('[track] kamailio event', x.message));
+      } catch (e) { await new Promise((res) => setTimeout(res, 2000)); }
+    }
+  })();
+}
+
 // ------------------------------------------------------------- trunk status
 let trunkState = {};   // name -> { endpoint: 'online'|'offline'|..., reg: 'Registered'|... }
 async function pollTrunkState() {
+  if (engine.name() === 'kamailio') { trunkState = await kam.trunkState(kamTrunks); return; }
   const st = {};
   try {
     for (const e of await ari.endpoints()) {
@@ -208,7 +291,7 @@ async function snapshot() {
   }));
   const live = +allLive || processes.reduce((s, p) => s + p.live, 0);
   return {
-    at: Date.now(), ariConnected: ari.connected, live,
+    at: Date.now(), engine: engine.name(), ariConnected: connected(), live,
     processCapacity: processes.filter((p) => p.active).reduce((s, p) => s + p.limit, 0),
     trunkCapacity: trunks.filter((t) => t.active).reduce((s, t) => s + (t.max || 0), 0),
     peakToday: +peakP.__all || 0,
@@ -227,7 +310,11 @@ function start() {
     saveCall(e.userevent || {}).catch((x) => console.error('[track] saveCall', x.message));
   });
   ari.events.on('connected', () => { reconcile().catch(() => {}); pollTrunkState().catch(() => {}); });
+  ari.wanted = () => engine.name() === 'asterisk';   // no reconnect attempts while Kamailio is the engine
   ari.connect();
+  consumeKam();
+  // engine switched: the old engine's calls are gone
+  engine.bus.on('changed', () => { trunkState = {}; kamSeen = 0; reconcile().catch(() => {}); setTimeout(() => pollTrunkState().catch(() => {}), 5000); });
 
   refreshMeta().catch((e) => console.error('[track] meta', e.message));
   setInterval(() => refreshMeta().catch(() => {}), 30000);
@@ -240,4 +327,4 @@ function start() {
   }, 1000);
 }
 
-module.exports = { start, bus, snapshot, refreshMeta, saveCall, onCreated, onDestroyed, disposition, today };
+module.exports = { start, bus, snapshot, refreshMeta, saveCall, onCreated, onDestroyed, disposition, today, kamCall, onKamEvent, connected };

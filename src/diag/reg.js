@@ -2,9 +2,11 @@
 // SIP registration view: outbound (trunk -> carrier) and inbound (customer -> us) per trunk / process.
 // Parsers are pure (unit tested); collect() runs the Asterisk CLI, reads the log and the live trace buffer.
 const { execFile } = require('child_process');
-const fs = require('fs/promises');
 const cfg = require('../config');
 const { q } = require('../db');
+const engine = require('../engine');
+const enginelog = require('../enginelog');
+const kam = require('../kamailio/status');
 
 // `pjsip show registrations`:  " t_x-reg/sip:1.2.3.4:5060   t_x-auth   Registered   (exp. 3245s)"
 function parseRegistrations(out) {
@@ -52,16 +54,7 @@ function lastLogLine(lines, needles) {
 const cli = (cmd) => new Promise((resolve) => {
   execFile('asterisk', ['-rx', cmd], { timeout: 4000, maxBuffer: 4 << 20 }, (err, out) => resolve(err ? '' : out));
 });
-async function logTail(bytes = 4 * 1024 * 1024) {
-  let fh;
-  try {
-    fh = await fs.open(cfg.asterisk.log, 'r');
-    const { size } = await fh.stat();
-    const len = Math.min(size, bytes), buf = Buffer.alloc(len);
-    await fh.read(buf, 0, len, size - len);
-    return buf.toString('utf8').split('\n');
-  } catch { return []; } finally { if (fh) await fh.close(); }
-}
+const logTail = () => enginelog.tail().then((t) => t.lines, () => []);
 
 // last REGISTER request / response in the live trace buffer that involves one of the IPs or users
 function lastPacket(log, ips, users) {
@@ -77,23 +70,25 @@ function lastPacket(log, ips, users) {
 }
 
 async function collect(traceLog) {
-  const [trunks, procs, regOut, dbOut, lines] = await Promise.all([
+  const onKam = engine.name() === 'kamailio', eng = engine.label();
+  const [trunks, procs, lines] = await Promise.all([
     // only whether a password exists, never the password itself
-    q(`SELECT name, host, port, register, username, (coalesce(password,'') <> '') AS has_pass, active FROM trunks ORDER BY name`),
+    q(`SELECT name, host, port, transport, register, username, (coalesce(password,'') <> '') AS has_pass, active FROM trunks ORDER BY name`),
     q('SELECT code, name, auth_type, sip_username, allowed_ips, active FROM processes ORDER BY code'),
-    cli('pjsip show registrations'), cli('database show registrar'), logTail(),
+    logTail(),
   ]);
-  const outReg = parseRegistrations(regOut), inReg = parseRegistrar(dbOut);
+  const [outReg, inReg] = onKam ? await Promise.all([kam.registrations(trunks.rows), kam.registrar()])
+    : [parseRegistrations(await cli('pjsip show registrations')), parseRegistrar(await cli('database show registrar'))];
   const now = Date.now();
   const rows = [];
   for (const t of trunks.rows) {
     const hasAuth = !!(t.username && t.has_pass);   // same rule as renderTrunks()
     const expected = !!(t.active && t.register && hasAuth);
     const why = !t.active ? 'trunk inactive' : !t.register ? '"Register" is off — carrier authenticates by IP'
-      : !hasAuth ? '"Register" is on but no username/password is set, so Asterisk sends no REGISTER' : '';
+      : !hasAuth ? `"Register" is on but no username/password is set, so ${eng} sends no REGISTER` : '';
     const r = outReg[t.name];
     const state = !expected ? 'NOT USED' : !r ? 'NOT LOADED' : /^registered$/i.test(r.status) ? 'REGISTERED' : r.status.toUpperCase();
-    const hint = state === 'NOT LOADED' ? 'Asterisk has no registration for this trunk — System → Re-apply config'
+    const hint = state === 'NOT LOADED' ? `${eng} has no registration for this trunk — System → Re-apply config`
       : state === 'REJECTED' ? 'Carrier refused the REGISTER (wrong username/password, or IP not allowed) — see the last log line / trace'
         : state === 'UNREGISTERED' ? 'No successful REGISTER yet (no reply or retrying) — trace it to see the carrier\'s answer' : '';
     rows.push({ kind: 'trunk', name: t.name, direction: 'out', who: `${t.username || '—'} → ${t.host}:${t.port || 5060}`,
@@ -132,14 +127,16 @@ function parseMonContacts(out) {
 // registered: code -> live (not expired) contacts the customer registered from (password auth)
 // reachable:  code -> OPTIONS ping result per fixed customer IP (IP auth)
 async function status() {
-  const [dbOut, contactsOut] = await Promise.all([cli('database show registrar'), cli('pjsip show contacts')]);
+  const onKam = engine.name() === 'kamailio';
+  const [inReg, reachable] = onKam ? await Promise.all([kam.registrar(), kam.reachable()])
+    : await Promise.all([cli('database show registrar').then(parseRegistrar), cli('pjsip show contacts').then(parseMonContacts)]);
   const now = Date.now(), registered = {};
-  for (const [code, list] of Object.entries(parseRegistrar(dbOut))) {
+  for (const [code, list] of Object.entries(inReg)) {
     const live = list.map(({ ip, port, userAgent, expiresAt }) => ({ ip, port, userAgent, expiresIn: expiresAt ? Math.round((expiresAt - now) / 1000) : null }))
       .filter((c) => c.expiresIn == null || c.expiresIn > 0);
     if (live.length) registered[code] = live;
   }
-  return { registered, reachable: parseMonContacts(contactsOut) };
+  return { registered, reachable };
 }
 
 module.exports = { collect, status, parseMonContacts, parseRegistrations, parseRegistrar, lastLogLine, lastPacket };

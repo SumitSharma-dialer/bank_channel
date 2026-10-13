@@ -8,6 +8,7 @@ host `172.20.10.201` (public `182.95.69.226` via NAT), app in `/opt/sipdist`, As
 | [architecture.md](architecture.md) | Components, ports, how a call flows (outbound and inbound), how a UI change reaches Asterisk |
 | [database.md](database.md) | Every table and column, relations, indexes, Redis key layout, differences between `schema.sql` and the live DB |
 | [asterisk.md](asterisk.md) | Which Asterisk files exist, which ones the app writes, which ones setup.sh edited, the generated dialplan logic, reload flow |
+| [kamailio.md](kamailio.md) | The second SIP engine: switching Asterisk ↔ Kamailio (super admin), files, call flow, call records, what is different |
 | [credentials-and-config.md](credentials-and-config.md) | Where every password / secret / setting is stored, which file reads it and what it must match |
 | [operations.md](operations.md) | Service management, capacity (how many calls) and tuning, logs, HTTP API, CLI tools, troubleshooting, backup |
 | [processes.md](processes.md) | Processes page: IP vs username + password authentication, every form field (IPs, SIP port, IP lock), the list columns, Connection online / offline and how it is checked, Peer config |

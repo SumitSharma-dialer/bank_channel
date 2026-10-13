@@ -1,0 +1,9 @@
+[Unit]
+Description=SIP Channel Distributor: engine switch requested by the web app
+
+[Path]
+PathChanged=/var/lib/sipdist/engine.request
+Unit=sipdist-engine.service
+
+[Install]
+WantedBy=multi-user.target

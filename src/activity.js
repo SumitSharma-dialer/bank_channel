@@ -53,10 +53,11 @@ const NAMES = [
   ['POST', /^\/users\/sessions\/end$/, 'Signed out sessions'],
   ['POST', /^\/me\/password$/, 'Changed own password'],
   ['GET', /^\/reports\/dispositions$/, 'Opened the console'],
-  ['GET', /^\/system\/(health|config-preview)$/, 'Opened system page'],
+  ['GET', /^\/system\/(health|config-preview|engine)$/, 'Opened system page'],
+  ['POST', /^\/system\/engine$/, 'Switched SIP engine'],
   ['GET', /^\/system\/resources\/history$/, 'Viewed resource history'],
-  ['GET', /^\/system\/cli\//, 'Ran Asterisk CLI view'],
-  ['POST', /^\/system\/apply$/, 'Re-applied Asterisk config'],
+  ['GET', /^\/system\/cli\//, 'Ran SIP engine view'],
+  ['POST', /^\/system\/apply$/, 'Re-applied SIP engine config'],
   ['GET', /^\/activity/, 'Viewed activity log'],
 ];
 const nameOf = (method, path) => (NAMES.find(([m, re]) => m === method && re.test(path)) || [])[2] || null;

@@ -175,7 +175,9 @@ if [[ ${ASTERISK_MODE:-integrate} != full ]]; then
   echo "  NOTE: the new limits apply after 'systemctl restart asterisk' (drops live calls — do it when idle)"
 fi
 
-if [[ ${ASTERISK_MODE:-integrate} == full ]]; then
+if systemctl is-active --quiet kamailio; then
+  echo "  NOTE: Kamailio is the SIP engine in use — Asterisk left stopped (switch back in the UI: System → SIP engine)"
+elif [[ ${ASTERISK_MODE:-integrate} == full ]]; then
 say "Restarting Asterisk with the lightweight module set"
 systemctl restart asterisk
 UP=0; for i in $(seq 1 20); do sleep 1; asterisk -rx 'core show version' >/dev/null 2>&1 && { UP=1; break; }; done
@@ -188,6 +190,28 @@ if [[ $UP -ne 1 ]]; then
 fi
 asterisk -rx 'module show like res_ari' | tail -1 || true
 fi
+
+say "Second SIP engine: Kamailio + rtpengine (installed, left stopped — switch in the UI: System → SIP engine)"
+if [[ ${KAMAILIO:-yes} == yes && $PKG == *apt-get ]]; then
+  if ! command -v kamailio >/dev/null || ! command -v rtpengine >/dev/null; then
+    # the packages must not start by themselves: Kamailio wants the SIP port Asterisk is using
+    printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d; chmod +x /usr/sbin/policy-rc.d
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends kamailio kamailio-lua-modules kamailio-redis-modules \
+      kamailio-utils-modules kamailio-extra-modules rtpengine-daemon || echo "  WARNING: Kamailio / rtpengine not installed — only Asterisk can be used"
+    rm -f /usr/sbin/policy-rc.d
+    systemctl disable kamailio rtpengine-daemon >/dev/null 2>&1 || true
+  fi
+fi
+if id kamailio >/dev/null 2>&1; then
+  # the app (user asterisk) writes Kamailio's files, Kamailio (group kamailio) reads them
+  mkdir -p /etc/kamailio/sipdist/dbtext
+  chown -R asterisk:kamailio /etc/kamailio/sipdist; chmod 2750 /etc/kamailio/sipdist /etc/kamailio/sipdist/dbtext
+fi
+mkdir -p /etc/kamailio/sipdist /var/lib/sipdist; chown asterisk:asterisk /var/lib/sipdist; chmod 755 /var/lib/sipdist
+usermod -aG systemd-journal asterisk 2>/dev/null || true   # Diagnostics → log reads Kamailio's journal
+install -m 755 "$SRC/deploy/sipdist-engine.sh" /usr/local/sbin/sipdist-engine
+cp "$SRC/deploy/sipdist-engine.path" "$SRC/deploy/sipdist-engine.service" /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now sipdist-engine.path
 
 say "Starting sipdist service"
 cp "$SRC/deploy/sipdist.service" /etc/systemd/system/sipdist.service

@@ -48,8 +48,9 @@ function parsePidJiffies(stat) {
 }
 
 const read = (p) => fs.readFile(p, 'utf8').catch(() => '');
-const pidof = (name) => new Promise((resolve) => {
-  execFile('pidof', ['-s', name], { timeout: 2000 }, (err, out) => resolve(err ? null : +String(out).trim() || null));
+// every process of the SIP engine in use (Kamailio has one per worker, plus rtpengine)
+const pidsOf = (names) => new Promise((resolve) => {
+  execFile('pidof', names, { timeout: 2000 }, (err, out) => resolve(err ? [] : String(out).trim().split(/\s+/).map(Number).filter(Boolean)));
 });
 
 async function disks() {
@@ -65,18 +66,21 @@ async function disks() {
 }
 
 async function collect() {
-  const pid = await pidof('asterisk');
-  const sample = async () => ({ cpu: parseCpuLine(await read('/proc/stat')), ast: pid ? parsePidJiffies(await read(`/proc/${pid}/stat`)) : 0 });
+  const engine = require('./engine');
+  const pids = await pidsOf(engine.name() === 'kamailio' ? ['kamailio', 'rtpengine'] : ['asterisk']);
+  const pid = pids.length;
+  const jiffies = async () => (await Promise.all(pids.map((p) => read(`/proc/${p}/stat`)))).reduce((s, t) => s + (t ? parsePidJiffies(t) : 0), 0);
+  const sample = async () => ({ cpu: parseCpuLine(await read('/proc/stat')), ast: await jiffies() });
   const a = await sample();
   await new Promise((r) => setTimeout(r, SAMPLE_MS));
   const b = await sample();
   const cores = os.cpus().length;
-  // Asterisk share of the whole box (all cores = 100 %), same scale as the CPU total
+  // the SIP engine's share of the whole box (all cores = 100 %), same scale as the CPU total
   const astPct = pid && b.cpu.total > a.cpu.total ? Math.round(((b.ast - a.ast) / (b.cpu.total - a.cpu.total)) * 1000) / 10 : null;
 
   return {
     at: Date.now(),
-    cpu: { percent: cpuPct(a.cpu, b.cpu), cores, model: (os.cpus()[0] || {}).model || '', load: os.loadavg().map((x) => Math.round(x * 100) / 100), asterisk: astPct },
+    cpu: { percent: cpuPct(a.cpu, b.cpu), cores, model: (os.cpus()[0] || {}).model || '', load: os.loadavg().map((x) => Math.round(x * 100) / 100), asterisk: astPct, engine: engine.label() },
     memory: parseMeminfo(await read('/proc/meminfo')),
     disks: await disks(),
     uptime: Math.round(os.uptime()),

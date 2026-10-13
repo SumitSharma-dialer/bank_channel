@@ -6,7 +6,7 @@ const fs = require('fs');
 const { execFileSync } = require('child_process');
 const { pool } = require('../db');
 
-const SPOOL = '/var/spool/asterisk';
+const SPOOL = '/var/spool/asterisk';   // test calls are placed by Asterisk: this tool only works while Asterisk is the SIP engine
 const LOG = '/var/log/asterisk/full';
 const RING_SEC = 45;
 const last10 = (v) => String(v || '').replace(/[^0-9]/g, '').slice(-10);

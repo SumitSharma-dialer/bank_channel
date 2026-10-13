@@ -1,11 +1,13 @@
 'use strict';
 // Diagnostics: issue tracker, live SIP trace (sngrep-like), pcap download (tcpdump), RTP analysis, Asterisk log search.
 const router = require('express').Router();
-const fs = require('fs/promises');
 const dns = require('dns').promises;
 const { execFile } = require('child_process');
 const cfg = require('../config');
 const ari = require('../ari');
+const engine = require('../engine');
+const enginelog = require('../enginelog');
+const kam = require('../kamailio/status');
 const { q, audit } = require('../db');
 const cap = require('../diag/capture');
 const issues = require('../diag/issues');
@@ -14,6 +16,8 @@ const { Bad, wrap, str, int } = require('./util');
 // Capture target -> IPs. target: '' (all) | 'ip' (+ host) | 'trunk:<name>' | 'process:<code>'
 const IP_RE = /^(?:\d{1,3}(?:\.\d{1,3}){3}(?:\/\d{1,2})?|[0-9a-fA-F:]{2,39})$/;
 const contactIps = (endpoint) => new Promise((resolve) => {
+  // Kamailio: where the process registered from
+  if (engine.name() === 'kamailio') return kam.registrar().then((r) => resolve([...new Set((r[endpoint.replace(/^p_/, '')] || []).map((c) => c.ip).filter(Boolean))]), () => resolve([]));
   execFile('asterisk', ['-rx', 'pjsip show contacts'], { timeout: 4000 }, (err, out) => {
     const ips = new Set();
     // "Contact:  p_acme/sip:acme@203.0.113.5:5060;ob   a1b2c3 Avail  12.3"
@@ -54,7 +58,7 @@ async function target(src) {
 router.get('/target', wrap(async (req, res) => res.json(await target(req.query))));
 
 router.get('/status', wrap(async (req, res) => {
-  res.json({ tools: cap.tools(), trace: cap.trace.status(), rtpRange: cfg.rtp, sipPort: cfg.sipPort, log: cfg.asterisk.log });
+  res.json({ tools: cap.tools(), trace: cap.trace.status(), rtpRange: cfg.rtp, sipPort: cfg.sipPort, log: engine.name() === 'kamailio' ? 'journalctl -u kamailio' : cfg.asterisk.log, engine: engine.name() });
 }));
 
 // ------------------------------------------------------------------ issues
@@ -133,6 +137,7 @@ router.post('/rtp/capture', wrap(async (req, res) => {
 
 // Asterisk's own RTP counters for every live channel (ARI GET /channels/{id}/rtp_statistics)
 router.get('/rtp/channels', wrap(async (req, res) => {
+  if (engine.name() === 'kamailio') throw new Bad('Per-channel RTP counters come from Asterisk. On Kamailio the audio goes through rtpengine: use "Capture RTP" above, or System → RTP for the rtpengine totals.');
   if (!ari.connected) throw new Bad('ARI is not connected');
   const chans = (await ari.channels()).filter((c) => /^PJSIP\//.test(c.name)).slice(0, 300);
   const out = [];
@@ -168,25 +173,17 @@ router.get('/log', wrap(async (req, res) => {
   const levels = String(req.query.levels || 'ERROR,WARNING,NOTICE').split(',').filter((l) => /^[A-Z]+$/.test(l));
   const lines = int(req.query.lines, { min: 50, max: 2000, def: 500 });
   const maxBytes = 32 * 1024 * 1024;   // the full log has verbose lines too
-  let fh;
-  try { fh = await fs.open(cfg.asterisk.log, 'r'); } catch (e) { throw new Bad(`cannot read ${cfg.asterisk.log}: ${e.code || e.message}`); }
-  try {
-    const { size } = await fh.stat();
-    const len = Math.min(size, maxBytes);
-    const buf = Buffer.alloc(len);
-    await fh.read(buf, 0, len, size - len);
-    const all = buf.toString('utf8').split('\n');
-    if (len < size) all.shift();   // partial first line
-    const out = [];
-    for (let i = all.length - 1; i >= 0 && out.length < lines; i--) {
-      const l = all[i]; if (!l) continue;
-      const m = LEVEL_RE.exec(l);
-      if (m && !levels.includes(m[1])) continue;
-      if (needle && !l.toLowerCase().includes(needle)) continue;
-      out.push(l.length > 2000 ? l.slice(0, 2000) + '…' : l);
-    }
-    res.json({ file: cfg.asterisk.log, scannedBytes: len, size, lines: out.reverse() });
-  } finally { await fh.close(); }
+  let t;
+  try { t = await enginelog.tail(maxBytes); } catch (e) { throw new Bad(`cannot read the ${engine.label()} log: ${e.code || e.message}`); }
+  const out = [];
+  for (let i = t.lines.length - 1; i >= 0 && out.length < lines; i--) {
+    const l = t.lines[i]; if (!l) continue;
+    const m = LEVEL_RE.exec(l);
+    if (m && !levels.includes(m[1])) continue;
+    if (needle && !l.toLowerCase().includes(needle)) continue;
+    out.push(l.length > 2000 ? l.slice(0, 2000) + '…' : l);
+  }
+  res.json({ file: t.file, scannedBytes: t.scannedBytes, size: t.size, lines: out.reverse() });
 }));
 
 module.exports = router;

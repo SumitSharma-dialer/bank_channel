@@ -1,0 +1,6 @@
+[Unit]
+Description=SIP Channel Distributor: switch the SIP engine (Asterisk <-> Kamailio)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/sipdist-engine --request

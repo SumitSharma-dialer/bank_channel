@@ -9,6 +9,9 @@
 | PostgreSQL 18 | `postgres` | `127.0.0.1:5432` | Config (trunks, processes, DIDs), call records, daily stats, audit log |
 | Redis | `redis` | `127.0.0.1:6379`, `[::1]:6379` (password protected) | Live channel counters, peaks, hit counters |
 
+Since 2026-10-13 Kamailio + rtpengine can carry the calls instead of Asterisk (System → SIP engine, super admins):
+see [kamailio.md](kamailio.md). Only one engine runs at a time; this document describes the Asterisk engine.
+
 Asterisk also listens on 4569 (IAX2), 4520 (DUNDi) and 5000 because the stock Debian config uses `autoload=yes`
 (setup.sh was run in *integrate* mode — see [asterisk.md](asterisk.md)). SIPDist does not use them.
 

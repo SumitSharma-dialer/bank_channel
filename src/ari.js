@@ -25,6 +25,7 @@ async function call(method, path, body) {
 const ari = {
   events: new EventEmitter(),
   connected: false,
+  wanted: null,   // () => false while another SIP engine is in use (src/engine.js)
   get: (p) => call('GET', p),
   put: (p, b) => call('PUT', p, b),
   post: (p, b) => call('POST', p, b),
@@ -42,6 +43,7 @@ const ari = {
       `/ari/events?app=${encodeURIComponent(cfg.ari.app)}&subscribeAll=true`;
     let retry = 1000;
     const open = () => {
+      if (ari.wanted && !ari.wanted()) { setTimeout(open, 3000); return; }
       const ws = new WebSocket(url, { headers: { Authorization: auth } });
       ws.on('open', () => {
         retry = 1000; ari.connected = true;

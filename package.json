@@ -1,7 +1,7 @@
 {
   "name": "sipdist",
   "version": "1.0.0",
-  "description": "SIP Channel Distributor — Asterisk/PJSIP + ARI + PostgreSQL + Redis + Node.js",
+  "description": "SIP Channel Distributor — Asterisk/PJSIP or Kamailio/rtpengine + PostgreSQL + Redis + Node.js",
   "main": "src/server.js",
   "type": "commonjs",
   "private": true,

@@ -4,7 +4,7 @@
 const { q } = require('../db');
 const redis = require('../redis');
 const ari = require('../ari');
-const applier = require('../asterisk/apply');
+const engine = require('../engine');
 const tracker = require('../tracker');
 const alerts = require('./alerts');
 
@@ -19,11 +19,16 @@ async function checks() {
   const out = [];
   const add = (key, severity, title, detail, hint) => out.push({ key, severity, title, detail, hint });
 
-  if (!ari.connected) add('ari_down', 'critical', 'Asterisk ARI disconnected',
-    'Live counters and CDR are not being recorded.', 'Check `systemctl status asterisk` and ARI user/password in .env and ari.conf.');
-  const a = applier.status();
-  if (a.ok === false) add('apply_failed', 'critical', 'Last config apply to Asterisk failed', a.error,
-    'Open System → Re-apply config; check the error and /etc/asterisk/sipdist permissions.');
+  const kam = engine.name() === 'kamailio';
+  if (kam ? !tracker.connected() : !ari.connected) add('ari_down', 'critical', kam ? 'Kamailio not responding' : 'Asterisk ARI disconnected',
+    kam ? 'Kamailio is not reporting — calls are probably not being handled.' : 'Live counters and CDR are not being recorded.',
+    kam ? 'Check `systemctl status kamailio rtpengine-daemon` and `journalctl -u kamailio`.' : 'Check `systemctl status asterisk` and ARI user/password in .env and ari.conf.');
+  const a = engine.status();
+  if (a.ok === false) add('apply_failed', 'critical', `Last config apply to ${engine.label()} failed`, a.error,
+    `Open System → Re-apply config; check the error and /etc/${engine.name()}/sipdist permissions.`);
+  if (a.restartNeeded) add('engine_restart', 'warning', 'Kamailio settings changed — restart needed',
+    'kamailio.cfg or rtpengine.conf changed (app update or .env). Trunks, processes and DIDs are not affected.',
+    'System → SIP engine → Restart Kamailio, at a quiet time: live calls are dropped.');
   try { await redis.ping(); } catch (e) { add('redis_down', 'critical', 'Redis not reachable', e.message, 'Check `systemctl status redis-server` and REDIS_* in .env.'); }
 
   let snap = null;
@@ -31,7 +36,7 @@ async function checks() {
   if (snap) {
     for (const t of snap.trunks.filter((x) => x.active)) {
       if (t.state === 'offline' || t.state === 'unavailable') add(`sip_down:${t.name}`, 'critical', `SIP DOWN: trunk ${t.name}`,
-        `Endpoint t_${t.name} is ${t.state} (SIP OPTIONS qualify gets no reply). Calls fail with SIP_DOWN.`,
+        `Trunk ${t.name} is ${t.state} (the SIP OPTIONS ping gets no reply). Calls fail with SIP_DOWN.`,
         'Check carrier IP/port, firewall, network route; run a SIP trace filtered on the carrier IP.');
       if (t.reg !== 'n/a' && t.reg !== 'unknown' && !/^registered$/i.test(t.reg)) add(`reg:${t.name}`, 'critical', `Trunk ${t.name} not registered`,
         `Registration state: ${t.reg}.`, 'Check trunk username/password and the carrier\'s 401/403 replies in a SIP trace.');
