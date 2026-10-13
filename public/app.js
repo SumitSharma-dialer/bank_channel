@@ -1907,9 +1907,9 @@ PAGES.system = async (main) => {
       <tr><td>CDR & daily stats</td><td><code>calls</code> + <code>daily_stats</code></td><td>hangup handler <code>sd-hangup</code> → <code>UserEvent(SIPDIST_END)</code>; backup in <code>cdr</code> via cdr_pgsql</td></tr>`;
   main.innerHTML = `<div class="head"><div><h1>System</h1><p>Server resources, health, SIP engine, generated ${EN()} config and ${EN()} views. Live ${EN()} log: <a href="#/diag?tab=log">Diagnostics → Engine log</a>.</p></div>
     <div class="actions"><button class="btn" id="reapply">Re-apply config to ${EN()}</button></div></div>
+    <div class="panel" style="margin-bottom:14px"><h2>SIP engine — Asterisk / Kamailio</h2><div class="body" id="engine">Loading…</div></div>
     <div class="panel" style="margin-bottom:14px"><h2>Server resources <small id="resInfo" style="font-weight:400;color:var(--ink-3);font-size:12.5px"></small></h2><div class="body"><div class="grid kpis" id="res" style="margin-bottom:0">Loading…</div></div></div>
     <div class="panel" style="margin-bottom:14px"><h2>Health</h2><div class="body"><div class="health" id="health">Loading…</div></div></div>
-    <div class="panel" style="margin-bottom:14px"><h2>SIP engine</h2><div class="body" id="engine">Loading…</div></div>
     <div class="panel" style="margin-bottom:14px"><h2>Where the UI meets ${EN()}</h2><div class="body"><div class="tw"><table>
       <thead><tr><th>UI action</th><th>Backend</th><th>${EN()}</th></tr></thead><tbody>${meets}
       </tbody></table></div></div></div>
