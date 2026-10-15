@@ -54,7 +54,8 @@ function parseUsrloc(res, now = Date.now()) {
   return out;
 }
 
-const regKey = (t) => `${t.username}@sip:${t.host}:${+t.port || 5060}${t.transport === 'tcp' ? ';transport=tcp' : ''}`;
+// r_username of the uacreg row: the user part of an IMS username user@domain (see renderUacreg)
+const regKey = (t) => `${String(t.username || '').trim().replace(/@[A-Za-z0-9.-]+$/, '')}@sip:${t.host}:${+t.port || 5060}${t.transport === 'tcp' ? ';transport=tcp' : ''}`;
 const safe = (p) => p.catch(() => null);
 
 // trunks: [{ name, host, port, transport, username, register }] -> { name: { endpoint, reg } } for the live monitor

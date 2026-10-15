@@ -121,6 +121,12 @@ test('carrier on its own port: own socket, rtpengine interface, uacreg contact, 
   assert.ok(R.renderRtpengine(one).includes('interface = 10.0.0.5\n') && R.buildData([trunk], [], one).pub_iface === null);
 });
 
+test('regKey: IMS username user@domain matches the uacreg row (user part, auth proxy)', () => {
+  const { regKey } = require('../src/kamailio/status');
+  assert.strictEqual(regKey({ username: '+918040102400@ka.ims.airtel.in', host: '10.5.70.19', port: 5060 }), '+918040102400@sip:10.5.70.19:5060');
+  assert.strictEqual(regKey({ username: 'u1', host: '10.1.1.1', port: 5061 }), 'u1@sip:10.1.1.1:5061');
+});
+
 test('kamailio.cfg: listens on the server IP, loads the Lua script, never prints an unknown advertise', () => {
   const c = R.renderCfg(o);
   for (const s of ['listen=udp:10.0.0.5:5060\n', 'listen=tcp:127.0.0.1:5065', 'cfgengine "lua"', 'modparam("app_lua", "load", "/etc/kamailio/sipdist/sipdist.lua")', 'profiles_with_value", "sdproc;sdtrunk"'])
