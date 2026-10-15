@@ -14,6 +14,8 @@ const CODEC = { ulaw: 'PCMU', alaw: 'PCMA', g722: 'G722', g729: 'G729', gsm: 'GS
 
 const clean = (v) => String(v == null ? '' : v).replace(/[\x00-\x1f\x7f]/g, '').trim();
 const ips = (s) => String(s || '').split(/[\s,]+/).map(clean).filter(Boolean);
+// "user@domain" (IMS carriers) -> { user, domain }; anything else -> null. See src/asterisk/render.js.
+const imsUser = (u) => { const m = /^([^@\s]+)@([A-Za-z0-9.-]+)$/.exec(clean(u)); return m ? { user: m[1], domain: m[2] } : null; };
 const codecs = (s) => [...new Set(String(s || 'ulaw,alaw').split(',').map((c) => CODEC[c.trim().toLowerCase()]).filter(Boolean))];
 const hoursOf = (v) => (typeof v === 'string' ? JSON.parse(v) : v) || null;
 
@@ -101,7 +103,7 @@ function buildData(trunks, processes, opts) {
     D.trunks[t.name] = {
       name: t.name, host, port: +t.port || 5060, tcp: t.transport === 'tcp',
       user: hasAuth ? clean(t.username) : null, pass: hasAuth ? clean(t.password) : null,
-      from_user: t.from_user ? clean(t.from_user) : null, from_domain: t.from_domain ? clean(t.from_domain) : null,
+      from_user: t.from_user ? clean(t.from_user) : null, from_domain: t.from_domain ? clean(t.from_domain) : (imsUser(t.username) || {}).domain || null,
       max: +t.max_channels || 0, cps: Math.max(0, Math.min(1000, +t.cps || 0)),
       prefix: NUM_RE.test(t.prefix || '') ? (t.prefix || '') : '', strip: Math.max(0, Math.min(10, +t.strip_digits || 0)),
       cli_prefix: NUM_RE.test(t.cli_prefix || '') ? (t.cli_prefix || '') : '',
@@ -144,8 +146,10 @@ function renderUacreg(trunks, opts) {
   for (const t of reg) uses.set(clean(t.username), (uses.get(clean(t.username)) || 0) + 1);
   for (const t of reg) {
     const host = clean(t.host), port = +t.port || 5060, user = clean(t.username);
+    // "user@domain": register user at domain through host:port, authenticate with the full username
+    const ims = imsUser(user), aor = ims ? ims.user : user;
     // l_uuid is the user part of the Contact Kamailio registers: the username, like Asterisk's contact_user
-    const row = [id++, uses.get(user) === 1 ? user : `t_${t.name}`, user, opts.selfIp, user, port === 5060 ? host : `${host}:${port}`, '',
+    const row = [id++, uses.get(user) === 1 ? aor : `t_${t.name}`, aor, opts.selfIp, aor, ims ? ims.domain : port === 5060 ? host : `${host}:${port}`, '',
       user, t.password, '', `sip:${host}:${port}${t.transport === 'tcp' ? ';transport=tcp' : ''}`, 3600, 0, 0,
       `${opts.advertiseIp || opts.selfIp}:${opts.sipPort}`, ''];
     out += row.map(dbt).join(':') + '\n';

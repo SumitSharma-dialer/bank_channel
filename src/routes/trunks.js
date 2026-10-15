@@ -25,8 +25,8 @@ function parse(b, existing) {
     port: int(b.port, { min: 1, max: 65535, def: 5060 }),
     transport: b.transport === 'tcp' ? 'tcp' : 'udp',
     username: safeText(b.username, 128) || null,
-    // blank password on edit = keep current
-    password: b.password ? safeText(b.password, 128) : (existing ? existing.password : null),
+    // blank password on edit = keep current; carriers' passwords may contain # ; [ ] (the renderers escape them)
+    password: b.password ? str(b.password, 128).replace(/[\x00-\x1f\x7f]/g, '') : (existing ? existing.password : null),
     register: bool(b.register),
     from_user: safeText(b.from_user, 128) || null,
     from_domain: safeText(b.from_domain, 255) || null,

@@ -90,6 +90,11 @@ test('uacreg: one row per registering trunk, ":" escaped', () => {
   assert.strictEqual(rows[1], '1:u1:u1:10.0.0.5:u1:10.1.1.1\\:5061::u1:p\\:1::sip\\:10.1.1.1\\:5061:3600:0:0:10.0.0.5\\:5060:');
 });
 
+test('uacreg: IMS username user@domain registers user at the domain via the trunk host', () => {
+  const rows = R.renderUacreg([{ ...trunk, host: '10.5.70.19', port: 5060, username: '+91804@ka.ims.airtel.in' }], o).trim().split('\n');
+  assert.strictEqual(rows[1], '1:+91804:+91804:10.0.0.5:+91804:ka.ims.airtel.in::+91804@ka.ims.airtel.in:p\\:1::sip\\:10.5.70.19\\:5060:3600:0:0:10.0.0.5\\:5060:');
+});
+
 test('kamailio.cfg: listens on the server IP, loads the Lua script, never prints an unknown advertise', () => {
   const c = R.renderCfg(o);
   for (const s of ['listen=udp:10.0.0.5:5060\n', 'listen=tcp:127.0.0.1:5065', 'cfgengine "lua"', 'modparam("app_lua", "load", "/etc/kamailio/sipdist/sipdist.lua")', 'profiles_with_value", "sdproc;sdtrunk"'])

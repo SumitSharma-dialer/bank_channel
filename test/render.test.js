@@ -15,6 +15,21 @@ test('trunk renders aor, auth, endpoint, identify, registration', () => {
     assert.ok(t.includes(s), s);
 });
 
+test('IMS trunk (user@domain): registers user at the domain through host as outbound proxy', () => {
+  const t = renderTrunks([{ ...trunk, host: '10.5.70.19', username: '+918040102400@ka.ims.airtel.in' }]);
+  for (const s of ['contact=sip:ka.ims.airtel.in\noutbound_proxy=sip:10.5.70.19:5060\\;lr\n', 'username=+918040102400@ka.ims.airtel.in\n',
+    'from_domain=ka.ims.airtel.in\noutbound_proxy=sip:10.5.70.19:5060\\;lr\n', 'match=10.5.70.19\n',
+    'server_uri=sip:ka.ims.airtel.in\nclient_uri=sip:+918040102400@ka.ims.airtel.in\noutbound_proxy=sip:10.5.70.19:5060\\;lr\ncontact_user=+918040102400\n'])
+    assert.ok(t.includes(s), s);
+  assert.ok(renderTrunks([{ ...trunk, host: '10.5.70.19', username: 'a@ka.ims.airtel.in', from_domain: 'x.example' }]).includes('from_domain=x.example\n'));
+  assert.ok(!renderTrunks([trunk]).includes('outbound_proxy'), 'plain username: no proxy');
+});
+
+test('trunk password keeps # and [ ], escapes ;', () => {
+  assert.ok(renderTrunks([{ ...trunk, password: 'Ringline#1' }]).includes('password=Ringline#1\n'));
+  assert.ok(renderTrunks([{ ...trunk, password: 'a;b[c]' }]).includes('password=a\\;b[c]\n'));
+});
+
 test('inactive trunk is not rendered', () => {
   assert.ok(!renderTrunks([{ ...trunk, active: false }]).includes('[t_airtel1]'));
 });
@@ -101,7 +116,7 @@ test('trunk cps paces outbound calls, 0 = no cps gate', () => {
 
 test('config injection is stripped', () => {
   const out = renderTrunks([{ ...trunk, password: 'x\n[evil]\ntype=endpoint' }]);
-  assert.ok(!out.includes('[evil]'));
+  assert.ok(!/^\[evil\]/m.test(out) && out.includes('password=x[evil]type=endpoint\n'), 'no new line, no new section');
   assert.throws(() => renderProcesses([{ ...proc, code: 'bad code' }]));
 });
 

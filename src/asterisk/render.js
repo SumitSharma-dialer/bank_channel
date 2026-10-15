@@ -9,6 +9,11 @@ const CODEC_RE = /^[a-z0-9_]+$/;
 const clean = (v) => String(v == null ? '' : v).replace(/[\r\n;#\[\]]/g, '').trim();
 const codecs = (s) => String(s || 'ulaw,alaw').split(',').map((c) => c.trim()).filter((c) => CODEC_RE.test(c)).join(',') || 'ulaw,alaw';
 const ips = (s) => String(s || '').split(/[\s,]+/).map(clean).filter(Boolean);
+// carrier passwords are given, not chosen: keep # and [ ] (only special at the start of a line, and a value never is);
+// ; starts a comment anywhere, so escape it
+const secret = (v) => String(v == null ? '' : v).replace(/[\x00-\x1f\x7f]/g, '').trim().replace(/;/g, '\\;');
+// "user@domain" -> { user, domain }; anything else -> null
+const imsUser = (u) => { const m = /^([^@\s]+)@([A-Za-z0-9.-]+)$/.exec(clean(u)); return m ? { user: m[1], domain: m[2] } : null; };
 
 // Transport section names in YOUR pjsip.conf. Empty = no transport= line (PJSIP picks a matching one).
 const tp = (kind) => {
@@ -73,11 +78,17 @@ function renderTrunks(trunks) {
     const port = +t.port || 5060;
     const transport = tp(t.transport === 'tcp' ? 'tcp' : 'udp');
     const hasAuth = !!(t.username && t.password);
+    // username "user@domain" (IMS carriers, e.g. +918040102400@ka.ims.airtel.in): the full username authenticates,
+    // the AOR / From / Request-URI use that domain and every request goes to host:port as outbound proxy
+    const ims = imsUser(t.username);
+    const target = ims ? ims.domain : `${host}:${port}`;
+    const proxy = ims ? `outbound_proxy=sip:${host}:${port}\\;lr\n` : '';
+    const fromDomain = t.from_domain || (ims && ims.domain);
 
     out += `;; ---- trunk ${t.name}${t.description ? ' — ' + clean(t.description) : ''} (max ${t.max_channels || 'unlimited'} ch, ${+t.cps || 'unlimited'} cps)\n`;
-    out += `[${id}]\ntype=aor\ncontact=sip:${host}:${port}\nqualify_frequency=60\nqualify_timeout=3\n\n`;
+    out += `[${id}]\ntype=aor\ncontact=sip:${target}\n${proxy}qualify_frequency=60\nqualify_timeout=3\n\n`;
     if (hasAuth) {
-      out += `[${id}-auth]\ntype=auth\nauth_type=userpass\nusername=${clean(t.username)}\npassword=${clean(t.password)}\n\n`;
+      out += `[${id}-auth]\ntype=auth\nauth_type=userpass\nusername=${clean(t.username)}\npassword=${secret(t.password)}\n\n`;
     }
     // trunks allowing inbound with DID ranges accept calls (sd-in-<name>), all others reject them
     const ctx = inRanges(t).length ? `sd-in-${t.name}` : 'sd-from-trunk';
@@ -85,14 +96,14 @@ function renderTrunks(trunks) {
       `disallow=all\nallow=${codecs(t.codecs)}\naors=${id}\n` +
       (hasAuth ? `outbound_auth=${id}-auth\n` : '') +
       (t.from_user ? `from_user=${clean(t.from_user)}\n` : '') +
-      (t.from_domain ? `from_domain=${clean(t.from_domain)}\n` : '') +
+      (fromDomain ? `from_domain=${clean(fromDomain)}\n` : '') + proxy +
       `direct_media=no\nrtp_symmetric=yes\nforce_rport=yes\nrewrite_contact=yes\n` +
       `send_rpid=yes\nsend_pai=yes\ntrust_id_outbound=yes\ntimers=no\n\n`;
     out += `[${id}-identify]\ntype=identify\nendpoint=${id}\nmatch=${host}\n\n`;
     if (t.register && hasAuth) {
       out += `[${id}-reg]\ntype=registration\n${transport}outbound_auth=${id}-auth\n` +
-        `server_uri=sip:${host}:${port}\nclient_uri=sip:${clean(t.username)}@${host}:${port}\n` +
-        `contact_user=${clean(t.username)}\nretry_interval=30\nforbidden_retry_interval=300\n` +
+        `server_uri=sip:${target}\nclient_uri=sip:${clean(ims ? ims.user : t.username)}@${target}\n${proxy}` +
+        `contact_user=${clean(ims ? ims.user : t.username)}\nretry_interval=30\nforbidden_retry_interval=300\n` +
         `fatal_retry_interval=300\nexpiration=3600\nline=yes\nendpoint=${id}\n\n`;
     }
   }
