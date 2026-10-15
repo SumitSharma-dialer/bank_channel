@@ -29,6 +29,13 @@ function selfIp() {
   });
 }
 
+// local IP the kernel sends from to reach ip (a carrier on its own port: that port's IP); null = unknown
+function srcFor(ip) {
+  return new Promise((resolve) => {
+    execFile('ip', ['-o', 'route', 'get', ip], { timeout: 2000 }, (err, out) => resolve(err ? null : (/\bsrc (\d+\.\d+\.\d+\.\d+)/.exec(out || '') || [])[1] || null));
+  });
+}
+
 async function loadRows() {
   const trunks = (await q('SELECT * FROM trunks ORDER BY name')).rows;
   const processes = (await q('SELECT * FROM processes ORDER BY code')).rows;
@@ -55,9 +62,16 @@ async function renderAll() {
   for (const t of trunks.filter((x) => x.active && !IP_RE.test(String(x.host).trim()))) {
     o.hostIps[String(t.host).trim()] = await dns.lookup(String(t.host).trim(), { all: true, family: 4 }).then((a) => a.map((x) => x.address), () => []);
   }
+  // which local IP each trunk is reached from: carriers on another port get their own socket (see render.js)
+  o.trunkSrc = {};
+  for (const t of trunks.filter((x) => x.active)) {
+    const h = String(t.host).trim(), ip = IP_RE.test(h) ? h : (o.hostIps[h] || [])[0];
+    if (ip) o.trunkSrc[t.name] = await srcFor(ip);
+  }
+  o.carrierIps = R.carrierIps(trunks, o);
   return {
     'data.lua': R.renderData(trunks, processes, o),
-    'dispatcher.list': R.renderDispatcher(trunks, processes),
+    'dispatcher.list': R.renderDispatcher(trunks, processes, o),
     'dbtext/uacreg': R.renderUacreg(trunks, o),
     'dbtext/version': R.renderDbVersion(),
     'kamailio.cfg': R.renderCfg(o),

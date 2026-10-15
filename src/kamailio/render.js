@@ -16,6 +16,14 @@ const clean = (v) => String(v == null ? '' : v).replace(/[\x00-\x1f\x7f]/g, '').
 const ips = (s) => String(s || '').split(/[\s,]+/).map(clean).filter(Boolean);
 // "user@domain" (IMS carriers) -> { user, domain }; anything else -> null. See src/asterisk/render.js.
 const imsUser = (u) => { const m = /^([^@\s]+)@([A-Za-z0-9.-]+)$/.exec(clean(u)); return m ? { user: m[1], domain: m[2] } : null; };
+// Carriers on their own port (e.g. Airtel on eno2): opts.trunkSrc = { trunk name: local IP the kernel sends from }.
+// Every such IP other than the server IP gets its own SIP socket and rtpengine interface; the customer side stays
+// on the server IP (rtpengine interface "pub").
+const PUB = 'pub';
+const srcOf = (t, o) => { const ip = ((o && o.trunkSrc) || {})[t.name]; return IP_RE.test(ip || '') && ip !== o.selfIp ? ip : null; };
+const carrierIps = (trunks, o) => [...new Set(trunks.filter((t) => t.active).map((t) => srcOf(t, o)).filter(Boolean))].sort();
+const ifaceOf = (ip) => 'car_' + ip.replace(/\./g, '_');
+const sockOf = (t, ip, o) => `${t.transport === 'tcp' ? 'tcp' : 'udp'}:${ip}:${o.sipPort}`;
 const codecs = (s) => [...new Set(String(s || 'ulaw,alaw').split(',').map((c) => CODEC[c.trim().toLowerCase()]).filter(Boolean))];
 const hoursOf = (v) => (typeof v === 'string' ? JSON.parse(v) : v) || null;
 
@@ -60,7 +68,9 @@ function buildData(trunks, processes, opts) {
   const procById = new Map(processes.map((p) => [p.id, p]));
   const D = { self_ip: opts.selfIp, sip_port: opts.sipPort, realm: opts.realm || 'asterisk', rpc_key: opts.rpcKey,
     ev_key: opts.evKey, sizes_key: opts.sizesKey, route_url: opts.routeUrl || '', reject,
-    procs: {}, trunks: {}, ip2proc: {}, cidr2proc: [], user2proc: {}, ip2trunk: {} };
+    procs: {}, trunks: {}, ip2proc: {}, cidr2proc: [], user2proc: {}, ip2trunk: {},
+    // rtpengine interface of the customer side; nil = one interface only, no direction flags needed
+    pub_iface: carrierIps(trunks, opts).length ? PUB : null };
 
   const ipUse = new Map();
   for (const p of processes) for (const i of ips(p.allowed_ips)) ipUse.set(i, (ipUse.get(i) || 0) + 1);
@@ -100,10 +110,13 @@ function buildData(trunks, processes, opts) {
     const hasAuth = !!(t.username && t.password);
     const ranges = t.did_ranges || [];
     const inbound = t.allow_inbound !== false ? ranges : [];
+    const src = srcOf(t, opts), ims = imsUser(t.username);
     D.trunks[t.name] = {
       name: t.name, host, port: +t.port || 5060, tcp: t.transport === 'tcp',
+      // IMS: Request-URI / To at this domain, sent to host:port; own port: send from that socket, audio on that interface
+      domain: ims ? ims.domain : null, sock: src ? sockOf(t, src, opts) : null, iface: src ? ifaceOf(src) : (carrierIps(trunks, opts).length ? PUB : null),
       user: hasAuth ? clean(t.username) : null, pass: hasAuth ? clean(t.password) : null,
-      from_user: t.from_user ? clean(t.from_user) : null, from_domain: t.from_domain ? clean(t.from_domain) : (imsUser(t.username) || {}).domain || null,
+      from_user: t.from_user ? clean(t.from_user) : null, from_domain: t.from_domain ? clean(t.from_domain) : (ims && ims.domain) || null,
       max: +t.max_channels || 0, cps: Math.max(0, Math.min(1000, +t.cps || 0)),
       prefix: NUM_RE.test(t.prefix || '') ? (t.prefix || '') : '', strip: Math.max(0, Math.min(10, +t.strip_digits || 0)),
       cli_prefix: NUM_RE.test(t.cli_prefix || '') ? (t.cli_prefix || '') : '',
@@ -124,10 +137,12 @@ function renderData(trunks, processes, opts) {
 
 // OPTIONS ping targets (dispatcher): set 1 = trunks, set 2 = fixed IPs of IP-auth processes (monitor only, never used
 // for routing). Kamailio pings every 60 s; `dispatcher.list` then says active / inactive.
-function renderDispatcher(trunks, processes) {
+function renderDispatcher(trunks, processes, o) {
   let out = HEADER('#', 'OPTIONS ping targets: setid destination flags priority attrs');
   for (const t of trunks.filter((x) => x.active)) {
-    out += `1 sip:${clean(t.host)}:${+t.port || 5060}${t.transport === 'tcp' ? ';transport=tcp' : ''} 0 0 duid=t_${t.name}\n`;
+    const src = srcOf(t, o);
+    out += `1 sip:${clean(t.host)}:${+t.port || 5060}${t.transport === 'tcp' ? ';transport=tcp' : ''} 0 0 duid=t_${t.name}` +
+      `${src ? `;socket=${sockOf(t, src, o)}` : ''}\n`;
   }
   for (const p of processes.filter((x) => x.active && x.auth_type === 'ip')) {
     for (const i of ips(p.allowed_ips).filter((x) => IP_RE.test(x))) out += `2 sip:${i}:${+p.sip_port || 5060} 0 0 duid=p_${p.code}_${i}\n`;
@@ -147,21 +162,23 @@ function renderUacreg(trunks, opts) {
   for (const t of reg) {
     const host = clean(t.host), port = +t.port || 5060, user = clean(t.username);
     // "user@domain": register user at domain through host:port, authenticate with the full username
-    const ims = imsUser(user), aor = ims ? ims.user : user;
+    const ims = imsUser(user), aor = ims ? ims.user : user, src = srcOf(t, opts);
     // l_uuid is the user part of the Contact Kamailio registers: the username, like Asterisk's contact_user
     const row = [id++, uses.get(user) === 1 ? aor : `t_${t.name}`, aor, opts.selfIp, aor, ims ? ims.domain : port === 5060 ? host : `${host}:${port}`, '',
       user, t.password, '', `sip:${host}:${port}${t.transport === 'tcp' ? ';transport=tcp' : ''}`, 3600, 0, 0,
-      `${opts.advertiseIp || opts.selfIp}:${opts.sipPort}`, ''];
+      src ? `${src}:${opts.sipPort}` : `${opts.advertiseIp || opts.selfIp}:${opts.sipPort}`, src ? sockOf(t, src, opts) : ''];
     out += row.map(dbt).join(':') + '\n';
   }
   return out;
 }
 const renderDbVersion = () => 'id(int,auto) table_name(string) table_version(int)\n1:version:1\n2:uacreg:5\n';
 
-// opts: { selfIp, advertiseIp, sipPort, rpcPort, dir, redis: { host, port, pass }, children, ngPort, debug }
+// opts: { selfIp, advertiseIp, carrierIps, sipPort, rpcPort, dir, redis: { host, port, pass }, children, ngPort, debug }
 function renderCfg(o) {
   const adv = o.advertiseIp && o.advertiseIp !== o.selfIp ? ` advertise ${o.advertiseIp}:${o.sipPort}` : '';
   const q = (s) => String(s).replace(/[\\"]/g, '\\$&');
+  // topoh with mask_ip "" (carrier ports) needs a name on every socket
+  const cars = o.carrierIps || [], nm = (n) => (cars.length ? ` name "${n}"` : '');
   const redis = `name=sd;addr=${o.redis.host};port=${o.redis.port};db=0${o.redis.pass ? ';pass=' + o.redis.pass : ''}`;
   return `#!KAMAILIO
 ${HEADER('#', 'Kamailio for the SIP Channel Distributor. Routing logic: sipdist.lua, data: data.lua')}
@@ -172,6 +189,8 @@ log_name="kamailio"
 children=${+o.children || 16}
 tcp_children=4
 auto_aliases=no
+# more than one SIP address: send from the one the kernel routes the destination through
+mhomed=${(o.carrierIps || []).length ? 1 : 0}
 dns=no
 rev_dns=no
 dns_try_ipv6=no
@@ -182,10 +201,13 @@ tcp_accept_no_cl=yes
 tcp_connection_lifetime=3605
 max_while_loops=1000
 
-listen=udp:${o.selfIp}:${o.sipPort}${adv}
-listen=tcp:${o.selfIp}:${o.sipPort}${adv}
-# JSON-RPC over HTTP for the web app (this host only, shared key checked in sipdist.lua)
-listen=tcp:127.0.0.1:${o.rpcPort}
+listen=udp:${o.selfIp}:${o.sipPort}${adv}${nm('pub_udp')}
+listen=tcp:${o.selfIp}:${o.sipPort}${adv}${nm('pub_tcp')}
+${cars.map((ip) => `# carrier port: trunks routed out of ${ip}
+listen=udp:${ip}:${o.sipPort}${nm(ifaceOf(ip) + '_udp')}
+listen=tcp:${ip}:${o.sipPort}${nm(ifaceOf(ip) + '_tcp')}
+`).join('')}# JSON-RPC over HTTP for the web app (this host only, shared key checked in sipdist.lua)
+listen=tcp:127.0.0.1:${o.rpcPort}${nm('rpc')}
 
 loadmodule "kex.so"
 loadmodule "corex.so"
@@ -227,8 +249,10 @@ modparam("tm", "fr_timer", 8000)
 modparam("tm", "fr_inv_timer", 60000)
 modparam("tm", "restart_fr_on_each_reply", 0)
 modparam("tm", "failure_reply_mode", 3)
+modparam("tm", "reparse_on_dns_failover", 0)
 
-modparam("rr", "enable_full_lr", 1)
+# plain ";lr" (RFC 3261): some carrier SBCs (Airtel IMS) silently drop requests with "lr=on"
+modparam("rr", "enable_full_lr", 0)
 modparam("rr", "append_fromtag", 1)
 
 modparam("usrloc", "db_mode", 0)
@@ -275,9 +299,10 @@ modparam("dispatcher", "ds_ping_latency_stats", 1)
 modparam("dispatcher", "ds_ping_from", "sip:sipdist@${o.selfIp}")
 modparam("dispatcher", "ds_ping_reply_codes", "class=2;class=3;class=5;class=6;code=401;code=403;code=404;code=405;code=407;code=480;code=481;code=484;code=486;code=488")
 
-# hide each side from the other: Via, Contact, Record-Route and Call-ID never show the other party's address
+# hide each side from the other: Via, Contact, Record-Route and Call-ID never show the other party's address.
+# mask_ip "" = the (advertised) address of the socket the message goes out of, so carriers on their own port see that port's IP
 modparam("topoh", "mask_key", "${q(o.maskKey || 'sipdist')}")
-modparam("topoh", "mask_ip", "${o.advertiseIp || o.selfIp}")
+modparam("topoh", "mask_ip", "${(o.carrierIps || []).length ? '' : o.advertiseIp || o.selfIp}")
 modparam("topoh", "mask_callid", 1)
 modparam("topoh", "sanity_checks", 0)
 
@@ -298,12 +323,15 @@ cfgengine "lua"
 `;
 }
 
-// opts: { selfIp, advertiseIp, ngPort, rtpStart, rtpEnd }
+// opts: { selfIp, advertiseIp, carrierIps, ngPort, rtpStart, rtpEnd }
 function renderRtpengine(o) {
   const addr = o.advertiseIp && o.advertiseIp !== o.selfIp ? `${o.selfIp}!${o.advertiseIp}` : o.selfIp;
+  // carrier ports: one named interface each; sipdist.lua picks them with direction= on every offer
+  const cars = o.carrierIps || [];
+  const iface = cars.length ? [`${PUB}/${addr}`, ...cars.map((ip) => `${ifaceOf(ip)}/${ip}`)].join(';') : addr;
   return `${HEADER('#', 'rtpengine: audio relay for Kamailio (userspace forwarding)')}[rtpengine]
 table = -1
-interface = ${addr}
+interface = ${iface}
 listen-ng = 127.0.0.1:${o.ngPort}
 listen-cli = 127.0.0.1:${o.ngPort + 1}
 port-min = ${o.rtpStart}
@@ -316,4 +344,4 @@ log-level = 5
 `;
 }
 
-module.exports = { buildData, renderData, renderDispatcher, renderUacreg, renderDbVersion, renderCfg, renderRtpengine, lua, cidr, hours, codecs };
+module.exports = { carrierIps, buildData, renderData, renderDispatcher, renderUacreg, renderDbVersion, renderCfg, renderRtpengine, lua, cidr, hours, codecs };

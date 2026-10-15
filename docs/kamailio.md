@@ -55,13 +55,37 @@ The app writes everything into `/etc/kamailio/sipdist/` (owner `asterisk`, group
 | `dispatcher.list` | OPTIONS ping targets: trunks (set 1), fixed IPs of IP-auth processes (set 2) | RPC `dispatcher.reload` |
 | `dbtext/uacreg` | trunks with "Register" on | RPC `uac.reg_reload` |
 | `kamailio.cfg` | modules and settings (server IP, ports, Redis) | engine restart |
-| `rtpengine.conf` | server IP, RTP port range | engine restart |
+| `rtpengine.conf` | server IP (+ carrier port IPs), RTP port range | engine restart |
 
 When `kamailio.cfg` or `rtpengine.conf` change (app update, `.env` change) while Kamailio runs, the System page and the
 issue list say "restart needed"; trunks, processes and DIDs never need a restart.
 
 `.env` settings (all optional): `KAMAILIO_LISTEN_IP` (default: the server's main IPv4), `KAMAILIO_ADVERTISE_IP` (only
 when SIP / RTP must show another address), `KAMAILIO_RPC_PORT` (5065), `RTPENGINE_NG_PORT` (2223), `KAMAILIO_CHILDREN` (16).
+
+## Carriers on their own port
+
+A carrier can be wired to another network port with only host routes to its SBC / media IPs (e.g. Airtel on `eno2`,
+`/etc/netplan/61-carrier-ringline-airtel.yaml`). On every render the app asks the kernel (`ip route get <trunk host>`)
+which local IP reaches each trunk. Every IP other than the server IP gets:
+
+- its own SIP sockets (`listen=udp|tcp:<ip>:5060 name "car_<ip>_udp"`) and `mhomed=1`; the trunk's calls
+  (`$fs`), registration (uacreg `socket`, `contact_addr`) and OPTIONS pings (dispatcher `socket=`) go out of it;
+- its own rtpengine interface (`interface = pub/<server ip>;car_<ip>/<ip>`). `sipdist.lua` passes
+  `direction=<from> direction=<to>` on every SDP offer (customer side = `pub`), so each leg's SDP shows the
+  address of its own port. Answers carry no direction;
+- topoh `mask_ip ""`: masked headers show the IP of the socket the message leaves from (topoh then needs a name on
+  every socket).
+
+Nothing on another port = `kamailio.cfg` / `rtpengine.conf` exactly as before. A new carrier port changes
+`kamailio.cfg` and `rtpengine.conf`: restart the engine. `net.ipv4.ip_nonlocal_bind = 1` (`deploy/sysctl-sipdist.conf`)
+and netplan `ignore-carrier: true` keep Kamailio starting while that port's cable is out.
+
+IMS trunks (username `user@domain`, e.g. `+918040102400@ka.ims.airtel.in`): Request-URI / To `sip:<number>@<domain>`,
+sent to Host:Port; uacreg registers `user` at `domain` via Host:Port with the full username.
+
+Record-Route uses plain `;lr` (`enable_full_lr` 0): Airtel's SBC silently drops an INVITE whose Record-Route
+has `lr=on` (found 2026-10-15 by replaying Kamailio's INVITE with one header changed at a time).
 
 ## Call flow (sipdist.lua)
 

@@ -95,6 +95,32 @@ test('uacreg: IMS username user@domain registers user at the domain via the trun
   assert.strictEqual(rows[1], '1:+91804:+91804:10.0.0.5:+91804:ka.ims.airtel.in::+91804@ka.ims.airtel.in:p\\:1::sip\\:10.5.70.19\\:5060:3600:0:0:10.0.0.5\\:5060:');
 });
 
+test('carrier on its own port: own socket, rtpengine interface, uacreg contact, dispatcher socket', () => {
+  const ims = { ...trunk, name: 'airtel_r', host: '10.5.70.19', port: 5060, username: '+918040102400@ka.ims.airtel.in' };
+  const m = { ...o, advertiseIp: '1.1.1.1', trunkSrc: { airtel1: '10.0.0.5', airtel_r: '10.37.101.114' } };
+  m.carrierIps = R.carrierIps([trunk, ims], m);
+  assert.deepStrictEqual(m.carrierIps, ['10.37.101.114']);
+  const D = R.buildData([trunk, ims], [], m);
+  assert.strictEqual(D.pub_iface, 'pub');
+  assert.deepStrictEqual([D.trunks.airtel_r.sock, D.trunks.airtel_r.iface, D.trunks.airtel_r.domain, D.trunks.airtel_r.from_domain],
+    ['udp:10.37.101.114:5060', 'car_10_37_101_114', 'ka.ims.airtel.in', 'ka.ims.airtel.in']);
+  assert.deepStrictEqual([D.trunks.airtel1.sock, D.trunks.airtel1.iface, D.trunks.airtel1.domain], [null, 'pub', null]);
+  const c = R.renderCfg(m);
+  for (const x of ['modparam("rr", "enable_full_lr", 0)', 'listen=udp:10.0.0.5:5060 advertise 1.1.1.1:5060 name "pub_udp"\n', 'listen=udp:10.37.101.114:5060 name "car_10_37_101_114_udp"\n',
+    'listen=tcp:10.37.101.114:5060 name "car_10_37_101_114_tcp"\n', 'listen=tcp:127.0.0.1:5065 name "rpc"\n', 'mhomed=1\n', 'modparam("topoh", "mask_ip", "")'])
+    assert.ok(c.includes(x), x);
+  assert.ok(R.renderRtpengine(m).includes('interface = pub/10.0.0.5!1.1.1.1;car_10_37_101_114/10.37.101.114\n'));
+  const u = R.renderUacreg([ims], m).trim().split('\n')[1];
+  assert.ok(u.endsWith(':10.37.101.114\\:5060:udp\\:10.37.101.114\\:5060'), u);
+  assert.ok(R.renderDispatcher([trunk, ims], [], m).includes('duid=t_airtel_r;socket=udp:10.37.101.114:5060\n'));
+  assert.ok(R.renderDispatcher([trunk, ims], [], m).includes('duid=t_airtel1\n'));
+  // nothing on another port: config exactly as before
+  const one = { ...o, trunkSrc: { airtel1: '10.0.0.5' } };
+  one.carrierIps = R.carrierIps([trunk], one);
+  assert.ok(R.renderCfg(one).includes('mhomed=0\n') && !R.renderCfg(one).includes(' name "') && R.renderCfg(one).includes('"mask_ip", "10.0.0.5"'));
+  assert.ok(R.renderRtpengine(one).includes('interface = 10.0.0.5\n') && R.buildData([trunk], [], one).pub_iface === null);
+});
+
 test('kamailio.cfg: listens on the server IP, loads the Lua script, never prints an unknown advertise', () => {
   const c = R.renderCfg(o);
   for (const s of ['listen=udp:10.0.0.5:5060\n', 'listen=tcp:127.0.0.1:5065', 'cfgengine "lua"', 'modparam("app_lua", "load", "/etc/kamailio/sipdist/sipdist.lua")', 'profiles_with_value", "sdproc;sdtrunk"'])

@@ -120,6 +120,12 @@ local function profile_size(profile, value)
   return tonumber(KSR.pv.get("$var(sdn)")) or 0
 end
 local function has_sdp() return KSR.textops.has_body_type("application/sdp") > 0 end
+-- carriers on their own port: rtpengine must take the offer in on interface a and send it out of interface b.
+-- Only offers carry direction; answers follow the offer. One interface only (no D.pub_iface) = no flags.
+local function dir_flags(a, b)
+  if not a or not b or a == b then return "" end
+  return " direction=" .. a .. " direction=" .. b
+end
 -- the far end may only be offered these codecs; rtpengine converts when the caller has none of them
 local function offer_flags(codecs)
   if not codecs or #codecs == 0 then return RTP end
@@ -129,10 +135,12 @@ local function offer_flags(codecs)
 end
 
 -- ---------------------------------------------------------------- send the call on
--- c = call event so far, o = { ruri, du, cli, from_user, from_dom, to, codecs, timeout, pai, hdrs, user, pass }
+-- c = call event so far, o = { ruri, du, sock, dir = { caller iface, callee iface }, cli, from_user, from_dom, to,
+--   codecs, timeout, pai, hdrs, user, pass }
 local function relay(c, o)
   KSR.pv.sets("$ru", o.ruri)
   if o.du then KSR.pv.sets("$du", o.du) end
+  if o.sock then KSR.pv.sets("$fs", o.sock) end
   for _, h in ipairs(STRIP) do KSR.hdr.remove(h) end
   KSR.uac.uac_replace_from('"' .. o.cli .. '"', "sip:" .. o.from_user .. "@" .. o.from_dom)
   KSR.uac.uac_replace_to("", o.to)
@@ -148,7 +156,16 @@ local function relay(c, o)
   end
   KSR.rr.record_route()
   KSR.nathelper.set_contact_alias()
-  if has_sdp() then KSR.rtpengine.rtpengine_manage(offer_flags(o.codecs)) end
+  local dir = o.dir or {}
+  local fwd, back = dir_flags(dir[1], dir[2]), dir_flags(dir[2], dir[1])
+  -- re-INVITEs: from the caller = fwd, from the callee = back (see within_dialog)
+  KSR.pv.sets("$dlg_var(sdfwd)", fwd)
+  KSR.pv.sets("$dlg_var(sdback)", back)
+  if has_sdp() then
+    KSR.rtpengine.rtpengine_manage(offer_flags(o.codecs) .. fwd)
+  else
+    KSR.pv.sets("$avp(sdoffer)", back)   -- no SDP: the callee's 183 / 200 is the offer
+  end
 
   local base = json(c):sub(1, -2)
   KSR.pv.sets("$avp(sdev)", base)
@@ -212,9 +229,12 @@ local function call_out(p, ip)
 
   local out, cli = t.prefix .. num:sub(t.strip + 1), t.cli_prefix .. did
   local dom = t.from_domain or D.self_ip
-  local dest = "sip:" .. out .. "@" .. t.host .. ":" .. t.port
+  local hop = "sip:" .. t.host .. ":" .. t.port .. (t.tcp and ";transport=tcp" or "")
+  -- IMS carriers: number at their domain, sent to host:port as outbound proxy (like Asterisk's outbound_proxy)
+  local dest = "sip:" .. out .. "@" .. (t.domain or (t.host .. ":" .. t.port))
   c.out, c.cliout = out, cli
-  relay(c, { ruri = dest .. (t.tcp and ";transport=tcp" or ""), cli = cli, from_user = t.from_user or cli, from_dom = dom,
+  relay(c, { ruri = t.domain and dest or (dest .. (t.tcp and ";transport=tcp" or "")), du = t.domain and hop or nil,
+    sock = t.sock, dir = { D.pub_iface, t.iface }, cli = cli, from_user = t.from_user or cli, from_dom = dom,
     to = dest, codecs = t.codecs, timeout = t.timeout, pai = true, user = t.user, pass = t.pass })
 end
 
@@ -264,7 +284,7 @@ local function call_in(t, ip)
     KSR.pv.sets("$rU", out)
     ruri, du = pv("$ru"), pv("$du")
   end
-  relay(c, { ruri = ruri, du = du ~= "" and du or nil, cli = did, from_user = did, from_dom = D.self_ip,
+  relay(c, { ruri = ruri, du = du ~= "" and du or nil, dir = { t.iface, D.pub_iface }, cli = did, from_user = did, from_dom = D.self_ip,
     to = "sip:" .. out .. "@" .. D.self_ip, codecs = p.codecs, timeout = t.timeout,
     hdrs = { "X-DID: " .. did, "X-Number: " .. cust } })
 end
@@ -289,7 +309,12 @@ local function within_dialog(m)
     KSR.nathelper.handle_ruri_alias()
     if m == "BYE" then
       KSR.rtpengine.rtpengine_manage(RTP)
-    elseif m == "INVITE" or m == "UPDATE" or m == "ACK" then
+    elseif m == "INVITE" or m == "UPDATE" then
+      local down = KSR.rr.is_direction("downstream") > 0   -- from the caller
+      local fwd, back = pv("$dlg_var(sdfwd)"), pv("$dlg_var(sdback)")
+      if not down then fwd, back = back, fwd end
+      if has_sdp() then KSR.rtpengine.rtpengine_manage(RTP .. fwd) else KSR.pv.sets("$avp(sdoffer)", back) end
+    elseif m == "ACK" then
       if has_sdp() then KSR.rtpengine.rtpengine_manage(RTP) end
       if m ~= "ACK" then
         KSR.nathelper.set_contact_alias()
@@ -362,7 +387,7 @@ function ksr_onreply_call()
   if code == 180 or code == 183 then KSR.pv.seti("$avp(sdring)", 1) end
   if code >= 180 and code < 300 then
     KSR.nathelper.set_contact_alias()
-    if has_sdp() then KSR.rtpengine.rtpengine_manage(RTP) end
+    if has_sdp() then KSR.rtpengine.rtpengine_manage(RTP .. pv("$avp(sdoffer)")) end
   end
   return 1
 end
@@ -371,7 +396,7 @@ function ksr_onreply_indlg()
   local code = tonumber(pv("$rs")) or 0
   if code >= 180 and code < 300 then
     KSR.nathelper.set_contact_alias()
-    if has_sdp() then KSR.rtpengine.rtpengine_manage(RTP) end
+    if has_sdp() then KSR.rtpengine.rtpengine_manage(RTP .. pv("$avp(sdoffer)")) end
   end
   return 1
 end
