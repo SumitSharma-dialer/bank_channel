@@ -797,6 +797,8 @@ async function peerConfig(p, via) {
   const viaSw = c.privateIp ? `<div class="tabs" style="margin:0 0 10px"><button data-via="private" class="${c.via === 'private' ? 'on' : ''}">Private ${esc(c.privateIp)}</button><button data-via="public" class="${c.via === 'public' ? 'on' : ''}">Public ${esc(c.publicIp)}</button></div>` : '';
   openModal(`Peer config · ${p.name}`, `<div class="mbody">
     <p class="hint" style="margin-bottom:12px">Give these details to the customer. They point their Asterisk at your server; calls over ${c.limit} at once get <b>503</b>.</p>
+    <p class="hint" style="margin-bottom:12px">Outbound: dial the <b>customer number</b> with <span class="mono">CALLERID(num)</span> = a caller-ID DID of the trunk
+      (e.g. <span class="mono">Set(CALLERID(num)=+911409303206)</span>); <span class="mono">+91</span> / <span class="mono">91</span> / <span class="mono">0</span> prefixes are fine.</p>
     ${viaSw}<div class="cred">
       <span>Server</span><code>${esc(c.server)}:${c.port}</code><button class="btn sm" data-copy="${esc(c.server)}">Copy</button>
       ${c.auth_type === 'password' ? `<span>Username</span><code>${esc(c.username)}</code><button class="btn sm" data-copy="${esc(c.username)}">Copy</button>

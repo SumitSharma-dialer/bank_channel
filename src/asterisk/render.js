@@ -421,6 +421,7 @@ function peerConfig(p, publicIp, sipPort = 5060, dids = []) {
   const byIp = p.auth_type === 'ip';
   const user = clean(p.sip_username);
   const pass = clean(p.sip_password);
+  const cli = (String(dids[0] || '').split('-')[0].match(/^\+?[0-9]{4,20}$/) || ['1234'])[0];   // example caller-ID DID
   const pjsip =
 `[sipdist]
 type=aor
@@ -466,7 +467,7 @@ exten => _X.,1,NoOp(inbound call from \${EXTEN} to DID \${CALLERID(num)})
 `;
   const extPjsip =
 `[from-internal-sipdist]
-exten => _X.,1,Set(CALLERID(num)=1234)   ; <- DID to show as caller ID
+exten => _X.,1,Set(CALLERID(num)=${cli})   ; <- DID to show as caller ID
  same => n,Dial(PJSIP/\${EXTEN}@sipdist,60)
  same => n,Hangup()
 
@@ -490,7 +491,7 @@ register => p_${p.code}:${pass}:${user}@${ip}:${sipPort}
 `}`;
   const extSip =
 `[from-internal-sipdist]
-exten => _X.,1,Set(CALLERID(num)=1234)   ; <- DID to show as caller ID
+exten => _X.,1,Set(CALLERID(num)=${cli})   ; <- DID to show as caller ID
  same => n,Dial(SIP/\${EXTEN}@sipdist,60)
  same => n,Hangup()
 
