@@ -175,12 +175,13 @@ test('inbound DID: app lookup, then assigned process; customer number dialed wit
   assert.ok(!renderDialplan([ip], [t]).includes('CURL('), 'no lookup URL -> assigned only');
 });
 
-test('outbound: only the dummy number with X-DID + X-Number; DID checked against trunk; everything else rejected', () => {
+test('outbound: dummy number with X-DID + X-Number, or customer number with caller ID = DID; DID checked against trunk', () => {
   const t = { ...trunk, did_ranges: [{ first_did: '912240001000', last_did: '912240001099', use_as_cli: true }] };
   const dp = renderDialplan([proc], [t]);
   assert.ok(dp.includes('exten => 9876543210,1,'), 'dummy number extension');
-  assert.ok(!dp.includes('exten => _[+0-9]X.'), 'no generic dialing');
-  assert.ok(/exten => _\.,1,NoOp\(dialed number is not the dummy number[\s\S]*SD_DISP=INVALID/.test(dp), 'other numbers -> INVALID');
+  assert.ok(dp.includes('exten => _X.,1,') && dp.includes('exten => _+X.,1,'), 'caller-ID dialing');
+  assert.ok(dp.includes('Set(SD_HDID=${FILTER(0-9a-zA-Z+.,${CALLERID(num)})})') && dp.includes('Set(SD_HNUM=${FILTER(0-9a-zA-Z+.,${EXTEN})})'));
+  assert.ok(/exten => _\.,1,NoOp\(dialed number is not a phone number[\s\S]*SD_DISP=INVALID/.test(dp), 'other numbers -> INVALID');
   assert.ok(dp.includes('PJSIP_HEADER(read,X-DID)') && dp.includes('PJSIP_HEADER(read,X-Number)'));
   assert.ok(!dp.includes('?plain'), 'headers are mandatory');
   assert.ok(dp.includes('Set(CALLERID(all)=${SD_DID} <${SD_DID}>)'));
@@ -188,7 +189,7 @@ test('outbound: only the dummy number with X-DID + X-Number; DID checked against
   assert.ok(dp.includes('Set(SD_DISP=NO_HEADER)') && dp.includes('Set(SD_DISP=INVALID_DID)'));
   assert.ok(renderDialplan([proc], [trunk]).includes('Set(SD_DIDOK=0)'), 'trunk without caller-ID DIDs rejects every call');
   const none = renderDialplan([{ ...proc, dummy_cli: '' }], [t]);
-  assert.ok(none.includes('no valid dummy number') && !none.includes('PJSIP_HEADER(read'), 'no dummy number -> all rejected');
+  assert.ok(!none.includes('PJSIP_HEADER(read') && none.includes('exten => _X.,1,'), 'no dummy number -> caller-ID dialing only');
 });
 
 test("contexts with a catch-all '_.' have an explicit h extension", () => {
@@ -210,6 +211,7 @@ test('peer config: pjsip.conf + extensions.conf as separate files, from_user sta
   assert.deepStrictEqual(c.files.chan_sip.map((f) => f.name), ['sip.conf', 'extensions.conf']);
   const [pj, ext] = c.files.pjsip.map((f) => f.text);
   assert.ok(pj.startsWith('[sipdist]\ntype=aor\n') && pj.includes('from_user=p_acme') && !pj.includes('exten'));
-  assert.ok(ext.startsWith('[from-internal-sipdist]\n') && ext.includes(' same => n,Dial(PJSIP/') && ext.includes('[sipdist-hdr]') && ext.includes('[from-sipdist]'));
+  assert.ok(ext.startsWith('[from-internal-sipdist]\n') && ext.includes('Set(CALLERID(num)=1234)') && ext.includes(' same => n,Dial(PJSIP/${EXTEN}@sipdist,60)') && ext.includes('[from-sipdist]'));
+  assert.ok(pj.includes('send_pai=yes') && c.chan_sip.includes('sendrpid=pai') && c.chan_sip.includes('Dial(SIP/${EXTEN}@sipdist,60)'), 'DID also sent as P-Asserted-Identity');
   assert.ok(c.pjsip.startsWith('pjsip.conf\n\n[sipdist]') && c.pjsip.includes('\n\nextensions.conf\n\n[from-internal-sipdist]'));
 });

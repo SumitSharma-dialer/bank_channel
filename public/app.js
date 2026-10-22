@@ -474,9 +474,9 @@ async function headerLog(p) {
   const rows = await api('GET', `/api/processes/${p.id}/header-log`);
   const chip = (st) => `<span class="chip ${st === 'ok' ? 'ok' : st === 'none' ? '' : 'bad'}">${esc(HDR_TXT[st] || st)}</span>`;
   openModal(`Header log · ${p.name}`, `<div class="mbody">
-    <p class="hint" style="margin-bottom:12px">Last 50 calls to dummy number <b class="mono">${esc(p.dummy_cli)}</b> and the headers the client sent
-      (<span class="mono">X-DID</span> = caller-ID DID, <span class="mono">X-Number</span> = customer number). “—” = header not sent.</p>
-    <div class="tw"><table><thead><tr><th>Time</th><th>X-DID</th><th>X-Number</th><th>Header check</th><th>Disposition</th><th class="r">Talk</th></tr></thead><tbody>
+    <p class="hint" style="margin-bottom:12px">Last 50 outbound calls and what the client sent: DID = caller ID (or <span class="mono">X-DID</span>),
+      number = dialed customer number (or <span class="mono">X-Number</span> on dummy number <b class="mono">${esc(p.dummy_cli)}</b>). “—” = not sent.</p>
+    <div class="tw"><table><thead><tr><th>Time</th><th>DID</th><th>Number</th><th>Check</th><th>Disposition</th><th class="r">Talk</th></tr></thead><tbody>
     ${rows.length ? rows.map((r) => `<tr><td class="mono" style="font-size:12.5px;white-space:nowrap">${fmtTime(r.start_time)}</td>
       <td class="mono">${r.hdr_did ? esc(r.hdr_did) : '<span style="color:var(--ink-3)">—</span>'}</td><td class="mono">${r.hdr_num ? esc(r.hdr_num) : '<span style="color:var(--ink-3)">—</span>'}</td>
       <td>${chip(r.hdr_status)}</td><td>${dispChip(r.disposition)}</td><td class="r num">${fmtDur(r.bill_sec)}</td></tr>`).join('')
@@ -621,7 +621,7 @@ async function procForm(p) {
     <div class="fsec">Inbound DIDs <small style="text-transform:none;letter-spacing:0">— fallback: a call to a DID first goes to the process that last called that caller (or last used the DID) as X-DID; ticked DIDs get the rest</small></div>
     <div class="full did-pick" id="didPick"></div>
     <div class="fsec">Outbound dialing</div>
-    <label>Dummy number <small>the client dials this number for every call</small><div class="row"><input name="dummy_cli" value="${esc(v.dummy_cli || '')}" class="mono" pattern="[0-9]{4,20}" required><button type="button" class="btn" id="sugCli">Suggest</button></div></label>
+    <label>Dummy number <small>only for header dialing (X-DID / X-Number)</small><div class="row"><input name="dummy_cli" value="${esc(v.dummy_cli || '')}" class="mono" pattern="[0-9]{4,20}" required><button type="button" class="btn" id="sugCli">Suggest</button></div></label>
     <p class="hint full" id="hdrHint"></p>
     <label class="check full"><input type="checkbox" name="active" ${v.active ? 'checked' : ''}> Active (inactive = calls rejected with 403, logged as BLOCKED)</label>
   </div><p class="err" id="pErr"></p><div class="mfoot"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary">${p ? 'Save & apply' : 'Create process'}</button></div></form>`,
@@ -641,9 +641,10 @@ async function procForm(p) {
       const cliN = t ? (t.did_ranges || []).filter((r) => r.use_as_cli) : [];
       $('#hdrHint').className = 'hint full' + (t && !cliN.length ? ' warn' : '');
       const dn = esc(f.dummy_cli.value.trim() || '<dummy number>');
-      $('#hdrHint').innerHTML = `The client dials <b class="mono">${dn}</b> with headers <span class="mono">X-DID: &lt;DID&gt;</span> and
-        <span class="mono">X-Number: &lt;customer number&gt;</span> (digits, optional +). We dial X-Number on ${t ? esc(t.name) : 'the trunk'} with X-DID as caller ID,
-        within this process's channel limit. Missing/bad header → NO_HEADER · DID not a caller-ID DID of ${t ? esc(t.name) : 'the trunk'} → INVALID_DID · any other dialed number → INVALID.`
+      $('#hdrHint').innerHTML = `The client dials the <b>customer number</b> with <span class="mono">CALLERID(num)=&lt;DID&gt;</span>
+        (or dials <b class="mono">${dn}</b> with headers <span class="mono">X-DID: &lt;DID&gt;</span> + <span class="mono">X-Number: &lt;customer number&gt;</span>), digits, optional +.
+        We dial the customer number on ${t ? esc(t.name) : 'the trunk'} with the DID as caller ID,
+        within this process's channel limit. Missing/bad DID or number → NO_HEADER · DID not a caller-ID DID of ${t ? esc(t.name) : 'the trunk'} → INVALID_DID · any other dialed number → INVALID.`
         + (t && !cliN.length ? ` <b>${esc(t.name)} has no caller-ID DID range yet — every header call will be rejected.</b>` : '');
       const h = $('#capHint');
       if (!t) { h.className = 'hint full warn'; h.textContent = 'Without a trunk every call from this process is rejected (NO_ROUTE).'; return; }
@@ -1097,10 +1098,10 @@ const DISP_HELP = {
   TRUNK_LIMIT: 'The trunk max channels was full, or the trunk CPS limit stayed full for 3 s.',
   BLOCKED: 'Process inactive, or this call direction is switched off for it.',
   NO_ROUTE: 'No active trunk for the process / no process for the inbound DID.',
-  INVALID: 'Dialed number is not the process dummy number (outbound) or DID not on the trunk (inbound).',
+  INVALID: 'Dialed number is not a phone number (outbound) or DID not on the trunk (inbound).',
   OFF_HOURS: 'Outside the process working time.',
-  NO_HEADER: 'X-DID / X-Number header missing or not digits. Fix the customer dialplan.',
-  INVALID_DID: 'X-DID is not a caller-ID DID of the trunk.',
+  NO_HEADER: 'Caller-ID DID / customer number (or X-DID / X-Number header) missing or not digits. Fix the customer dialplan.',
+  INVALID_DID: 'Caller ID (X-DID) is not a caller-ID DID of the trunk.',
 };
 const Q850 = { 1: 'unallocated number', 3: 'no route to destination', 16: 'normal clearing', 17: 'user busy', 18: 'no user responding',
   19: 'no answer', 20: 'subscriber absent', 21: 'call rejected', 27: 'destination out of order', 28: 'invalid number format',

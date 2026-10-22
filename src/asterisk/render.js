@@ -245,18 +245,22 @@ function cpsGate(t) {
     ` same => n(cpsok),NoOp(cps ${cps} on ${t.name}, waited \${SD_CPSW} x 100 ms)\n`;
 }
 
-// Outbound = header dialing only: the client (identified by IP) dials the process's dummy number and sends
-// X-DID (caller ID, must be a caller-ID DID of the trunk) + X-Number (customer number), digits with an optional
-// leading +. Missing/bad header -> NO_HEADER, DID off-trunk -> INVALID_DID, any other dialed number -> INVALID.
+// Outbound, two ways (client identified by IP or password):
+//  - caller-ID dialing: the client dials the customer number and sets CALLERID(num) = DID (From user, or
+//    P-Asserted-Identity when from_user is p_<code>; trust_id_inbound=yes makes Asterisk use it)
+//  - header dialing: the client dials the process's dummy number and sends X-DID (caller ID) + X-Number (customer number)
+// DID must be a caller-ID DID of the trunk, both digits with an optional leading +.
+// Missing/bad DID or number -> NO_HEADER, DID off-trunk -> INVALID_DID, anything else dialed -> INVALID.
 const DUMMY_RE = /^[0-9]{4,20}$/;
 const HDR_DID = 'X-DID';
 const HDR_NUM = 'X-Number';
 const SAFE = '0-9a-zA-Z+.';   // raw header values are reduced to these chars before logging
-function headerCheck(t) {
-  return ` same => n,Set(SD_HDIDL=\${LEN(\${PJSIP_HEADER(read,${HDR_DID})})})\n` +
-    ` same => n,Set(SD_HNUML=\${LEN(\${PJSIP_HEADER(read,${HDR_NUM})})})\n` +
-    ` same => n,Set(SD_HDID=\${FILTER(${SAFE},\${PJSIP_HEADER(read,${HDR_DID})})})\n` +
-    ` same => n,Set(SD_HNUM=\${FILTER(${SAFE},\${PJSIP_HEADER(read,${HDR_NUM})})})\n` +
+// didSrc / numSrc: dialplan expressions of the raw DID and customer number
+function headerCheck(t, didSrc = `\${PJSIP_HEADER(read,${HDR_DID})}`, numSrc = `\${PJSIP_HEADER(read,${HDR_NUM})}`) {
+  return ` same => n,Set(SD_HDIDL=\${LEN(${didSrc})})\n` +
+    ` same => n,Set(SD_HNUML=\${LEN(${numSrc})})\n` +
+    ` same => n,Set(SD_HDID=\${FILTER(${SAFE},${didSrc})})\n` +
+    ` same => n,Set(SD_HNUM=\${FILTER(${SAFE},${numSrc})})\n` +
     // DID and number: last 10 digits, so +91 / 91 / 0 prefixed forms all match the trunk's ranges and dial alike
     ` same => n,Set(SD_DID=\${FILTER(0-9,\${SD_HDID}):-10})\n` +
     ` same => n,Set(SD_CNUM=\${FILTER(0-9,\${SD_HNUM})})\n` +
@@ -314,10 +318,16 @@ function renderDialplan(processes, trunks, tz, routeUrl, rejectCodes) {
         timeGate(hoursOf(p.out_hours), 'open', tz) +
         dialTail(p, t, 'SD_DEST', '') +
         headerRejects();
-    } else {
-      out += `; WARNING: no valid dummy number - every call is rejected\n`;
     }
-    out += reject(p.code, t.name, 'INVALID', 'dialed number is not the dummy number') + '\n';
+    // caller-ID dialing: dialed number = customer number, CALLERID(num) = DID
+    for (const pat of ['_X.', '_+X.']) {
+      out += `exten => ${pat},1,NoOp(${p.code} customer number via ${t.name}, caller ID = DID)\n` + ENTRY(p.code, t.name) +
+        headerCheck(t, '${CALLERID(num)}', '${EXTEN}') +
+        timeGate(hoursOf(p.out_hours), 'open', tz) +
+        dialTail(p, t, 'SD_DEST', '') +
+        headerRejects();
+    }
+    out += reject(p.code, t.name, 'INVALID', 'dialed number is not a phone number') + '\n';
   }
   for (const t of trunks.filter((x) => x.active)) {
     assertName(t.name, 'trunk');
@@ -408,7 +418,6 @@ function inboundContext(t, processes, tz, routeUrl) {
 // from_user must stay p_<code>: Asterisk identifies the endpoint by that name (see renderProcesses).
 function peerConfig(p, publicIp, sipPort = 5060, dids = []) {
   const ip = clean(publicIp);
-  const dummy = DUMMY_RE.test(String(p.dummy_cli || '')) ? p.dummy_cli : '<dummy number>';
   const byIp = p.auth_type === 'ip';
   const user = clean(p.sip_username);
   const pass = clean(p.sip_password);
@@ -431,6 +440,7 @@ disallow=all
 allow=ulaw,alaw
 aors=sipdist
 direct_media=no
+send_pai=yes
 ${byIp ? '' : `outbound_auth=sipdist-auth\nfrom_user=p_${p.code}\n`}
 [sipdist-identify]
 type=identify
@@ -447,7 +457,8 @@ contact_user=${user}
 retry_interval=30
 expiration=300
 `}`;
-  // outbound: dial our dummy number, caller-ID DID + customer number in headers; inbound DID calls / callbacks
+  // outbound: dial the customer number with the DID as caller ID (also sent as P-Asserted-Identity, since From may
+  // carry p_<code>); inbound DID calls / callbacks
   const inbound = (dids.length ? `; your inbound DIDs: ${dids.map(clean).join(', ')}\n` : '') +
 `[from-sipdist]
 exten => _X.,1,NoOp(inbound call from \${EXTEN} to DID \${CALLERID(num)})
@@ -455,14 +466,9 @@ exten => _X.,1,NoOp(inbound call from \${EXTEN} to DID \${CALLERID(num)})
 `;
   const extPjsip =
 `[from-internal-sipdist]
-exten => _X.,1,Set(SD_USE_DID=1234)   ; <- DID to show as caller ID
- same => n,Dial(PJSIP/${dummy}@sipdist,60,b(sipdist-hdr^s^1(\${SD_USE_DID},\${EXTEN})))
+exten => _X.,1,Set(CALLERID(num)=1234)   ; <- DID to show as caller ID
+ same => n,Dial(PJSIP/\${EXTEN}@sipdist,60)
  same => n,Hangup()
-
-[sipdist-hdr]
-exten => s,1,Set(PJSIP_HEADER(add,${HDR_DID})=\${ARG1})
- same => n,Set(PJSIP_HEADER(add,${HDR_NUM})=\${ARG2})
- same => n,Return()
 
 ${inbound}`;
   const sipConf =
@@ -477,15 +483,15 @@ allow=alaw
 insecure=port,invite
 qualify=yes
 nat=force_rport,comedia
+sendrpid=pai
 ${byIp ? '' : `
 ; in the [general] section — register: you show online and receive inbound DID calls / callbacks
 register => p_${p.code}:${pass}:${user}@${ip}:${sipPort}
 `}`;
   const extSip =
 `[from-internal-sipdist]
-exten => _X.,1,SIPAddHeader(${HDR_DID}: 1234)   ; <- DID to show as caller ID
- same => n,SIPAddHeader(${HDR_NUM}: \${EXTEN})
- same => n,Dial(SIP/${dummy}@sipdist,60)
+exten => _X.,1,Set(CALLERID(num)=1234)   ; <- DID to show as caller ID
+ same => n,Dial(SIP/\${EXTEN}@sipdist,60)
  same => n,Hangup()
 
 ${inbound}`;
