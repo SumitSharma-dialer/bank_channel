@@ -510,6 +510,8 @@ ALTER TABLE daily_stats ADD CONSTRAINT daily_stats_scope_check CHECK (scope IN (
 
 -- SIP_DOWN: trunk (or customer, inbound) unreachable - Dial() returned CHANUNAVAIL
 ALTER TABLE daily_stats ADD COLUMN IF NOT EXISTS sip_down INT NOT NULL DEFAULT 0;
+-- REJECTED: CHANUNAVAIL while the trunk is up (the carrier refused the call, e.g. 480 + cause 31)
+ALTER TABLE daily_stats ADD COLUMN IF NOT EXISTS rejected INT NOT NULL DEFAULT 0;
 -- custom_code: admin-editable code shown in the UI, CSV and reports instead of the internal code ('' = the code).
 -- First time the column is added, CHANNEL_LIMIT is shown as LIMIT_REACH.
 DO $$BEGIN
@@ -590,7 +592,8 @@ INSERT INTO dispositions(code,label,source,sip_code,sort,custom_code) VALUES
   ('OFF_HOURS',     'Rejected: outside working time', 'distributor', 480, 12, ''),
   ('NO_HEADER',     'Rejected: DID/number header missing', 'distributor', 484, 13, ''),
   ('INVALID_DID',   'Rejected: DID not on trunk',     'distributor', 403, 14, ''),
-  ('SIP_DOWN',      'SIP down / unreachable',         'trunk',       503, 15, '')
+  ('SIP_DOWN',      'SIP down / unreachable',         'trunk',       503, 15, ''),
+  ('REJECTED',      'Rejected by carrier',            'trunk',       480, 16, '')
 ON CONFLICT (code) DO UPDATE SET source=EXCLUDED.source, sort=EXCLUDED.sort;
 
 -- App-wide settings. sip_engine = which SIP engine carries the calls: 'asterisk' | 'kamailio' (src/engine.js)

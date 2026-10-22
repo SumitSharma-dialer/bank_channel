@@ -6,7 +6,7 @@ const { wrap, str, int } = require('./util');
 const { isViewer } = require('../scope');
 
 const DISPS = ['ANSWERED', 'BUSY', 'NO_ANSWER', 'CANCEL', 'CONGESTION', 'FAILED',
-  'CHANNEL_LIMIT', 'TRUNK_LIMIT', 'BLOCKED', 'NO_ROUTE', 'INVALID', 'OFF_HOURS', 'NO_HEADER', 'INVALID_DID', 'SIP_DOWN'];
+  'CHANNEL_LIMIT', 'TRUNK_LIMIT', 'BLOCKED', 'NO_ROUTE', 'INVALID', 'OFF_HOURS', 'NO_HEADER', 'INVALID_DID', 'SIP_DOWN', 'REJECTED'];
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function dateRange(qs) {
@@ -81,7 +81,7 @@ router.get('/daily', wrap(async (req, res) => {
   if (req.query.ref) { args.push(str(req.query.ref, 32)); extra += ` AND ref=$${args.length}`; }
   if (viewer) { args.push(req.auth.processes); extra += ` AND ref = ANY($${args.length})`; }
   const { rows } = await q(`SELECT to_char(day,'YYYY-MM-DD') AS day, ref, total, answered, busy, no_answer, cancel, congestion, failed,
-      channel_limit, trunk_limit, blocked, no_route, invalid, off_hours, no_header, invalid_did, sip_down, talk_sec, peak_channels
+      channel_limit, trunk_limit, blocked, no_route, invalid, off_hours, no_header, invalid_did, sip_down, rejected, talk_sec, peak_channels
     FROM daily_stats WHERE day BETWEEN $1 AND $2 AND scope=$3${extra} ORDER BY day DESC, ref`, args);
   res.json({ from, to, scope, rows });
 }));

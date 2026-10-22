@@ -49,7 +49,7 @@ function applyToast(r, what) {
 }
 
 const DISP_CLASS = { ANSWERED: 'ok', BUSY: 'warn', NO_ANSWER: 'warn', CANCEL: '', CONGESTION: 'bad', FAILED: 'bad',
-  CHANNEL_LIMIT: 'info', TRUNK_LIMIT: 'info', BLOCKED: 'bad', NO_ROUTE: 'bad', INVALID: 'bad', OFF_HOURS: 'warn', NO_HEADER: 'bad', INVALID_DID: 'bad', SIP_DOWN: 'bad' };
+  CHANNEL_LIMIT: 'info', TRUNK_LIMIT: 'info', BLOCKED: 'bad', NO_ROUTE: 'bad', INVALID: 'bad', OFF_HOURS: 'warn', NO_HEADER: 'bad', INVALID_DID: 'bad', SIP_DOWN: 'bad', REJECTED: 'bad' };
 // custom code set on the Dispositions page (e.g. CHANNEL_LIMIT -> LIMIT_REACH), else the internal code
 const dispInfo = (d) => S.dispositions.find((x) => x.code === d) || {};
 const dispName = (d) => dispInfo(d).custom_code || d;
@@ -903,7 +903,7 @@ PAGES.stats = async (main) => {
       <select id="uStep" aria-label="Interval"><option value="0">Auto interval</option><option value="5">5 min</option><option value="15">15 min</option><option value="60">1 hour</option><option value="1440">1 day</option></select></span></h2>
       <div class="body"><div class="legend u-legend" id="uLegend"></div><div class="rh-chart" id="uChart"></div></div></div>
     <div class="panel" style="margin-bottom:14px"><h2>Calls per day</h2><div class="body" id="sChart"></div></div>
-    <div class="panel"><div class="tw"><table><thead><tr><th>Day</th><th id="refH">Process</th><th class="r">Total</th><th class="r">Answered</th><th class="r">Busy</th><th class="r">No ans.</th><th class="r">Cancel</th><th class="r">Congest.</th><th class="r">Failed</th><th class="r" title="trunk / far end unreachable">SIP down</th><th class="r" title="CHANNEL_LIMIT + TRUNK_LIMIT + BLOCKED + NO_ROUTE + INVALID + OFF_HOURS + NO_HEADER + INVALID_DID">Rejected</th><th class="r">ASR</th><th class="r">ACD</th><th class="r">Talk</th><th class="r">Peak ch</th></tr></thead><tbody id="sBody"></tbody></table></div></div>`;
+    <div class="panel"><div class="tw"><table><thead><tr><th>Day</th><th id="refH">Process</th><th class="r">Total</th><th class="r">Answered</th><th class="r">Busy</th><th class="r">No ans.</th><th class="r">Cancel</th><th class="r">Congest.</th><th class="r">Failed</th><th class="r" title="trunk down (no reply to OPTIONS)">SIP down</th><th class="r" title="carrier / far end refused the call while the trunk was up">Carrier rej.</th><th class="r" title="CHANNEL_LIMIT + TRUNK_LIMIT + BLOCKED + NO_ROUTE + INVALID + OFF_HOURS + NO_HEADER + INVALID_DID">Rejected</th><th class="r">ASR</th><th class="r">ACD</th><th class="r">Talk</th><th class="r">Peak ch</th></tr></thead><tbody id="sBody"></tbody></table></div></div>`;
   const f = $('#sf');
   const fillRefs = async () => {
     const list = f.scope.value === 'trunk' ? (await api('GET', '/api/trunks')).map((t) => t.name)
@@ -916,7 +916,7 @@ PAGES.stats = async (main) => {
     const reached = r.total - rej(r);
     return `<tr${label ? ' style="font-weight:600"' : ''}><td class="mono">${label || r.day}</td><td>${label ? '' : esc(r.ref)}</td>
       <td class="r num">${fmtInt(r.total)}</td><td class="r num">${fmtInt(r.answered)}</td><td class="r num">${fmtInt(r.busy)}</td><td class="r num">${fmtInt(r.no_answer)}</td>
-      <td class="r num">${fmtInt(r.cancel)}</td><td class="r num">${fmtInt(r.congestion)}</td><td class="r num">${fmtInt(r.failed)}</td><td class="r num">${fmtInt(r.sip_down)}</td>
+      <td class="r num">${fmtInt(r.cancel)}</td><td class="r num">${fmtInt(r.congestion)}</td><td class="r num">${fmtInt(r.failed)}</td><td class="r num">${fmtInt(r.sip_down)}</td><td class="r num">${fmtInt(r.rejected || 0)}</td>
       <td class="r num" title="process limit (${esc(dispName('CHANNEL_LIMIT'))}) ${r.channel_limit} · trunk limit ${r.trunk_limit} · blocked ${r.blocked} · no route ${r.no_route} · invalid ${r.invalid} · off hours ${r.off_hours || 0} · no header ${r.no_header || 0} · invalid DID ${r.invalid_did || 0}">${fmtInt(rej(r))}</td>
       <td class="r num">${pct(r.answered, reached)}%</td><td class="r num">${r.answered ? fmtDur(Math.round(r.talk_sec / r.answered)) : '—'}</td>
       <td class="r num">${fmtDur(r.talk_sec)}</td><td class="r num">${fmtInt(r.peak_channels)}</td></tr>`;
@@ -934,11 +934,11 @@ PAGES.stats = async (main) => {
     const d = formData(f);
     $('#refH').textContent = { trunk: 'Trunk', did: 'DID' }[d.scope] || 'Process';
     const r = await api('GET', '/api/reports/daily?' + new URLSearchParams(d));
-    const keys = ['total', 'answered', 'busy', 'no_answer', 'cancel', 'congestion', 'failed', 'sip_down', 'channel_limit', 'trunk_limit', 'blocked', 'no_route', 'invalid', 'off_hours', 'no_header', 'invalid_did', 'talk_sec'];
-    const tot = Object.fromEntries(keys.map((k) => [k, r.rows.reduce((s, x) => s + +x[k], 0)]));
+    const keys = ['total', 'answered', 'busy', 'no_answer', 'cancel', 'congestion', 'failed', 'sip_down', 'rejected', 'channel_limit', 'trunk_limit', 'blocked', 'no_route', 'invalid', 'off_hours', 'no_header', 'invalid_did', 'talk_sec'];
+    const tot = Object.fromEntries(keys.map((k) => [k, r.rows.reduce((s, x) => s + +x[k] || 0, 0)]));
     tot.peak_channels = Math.max(0, ...r.rows.map((x) => x.peak_channels));
     $('#sBody').innerHTML = r.rows.length ? r.rows.map((x) => row(x)).join('') + row(tot, 'Total')
-      : `<tr><td colspan="15" class="empty">No calls in this range.</td></tr>`;
+      : `<tr><td colspan="16" class="empty">No calls in this range.</td></tr>`;
     // per-day chart
     const days = []; for (let t = new Date(r.from + 'T00:00:00Z'); t <= new Date(r.to + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + 1)) days.push(t.toISOString().slice(0, 10));
     const by = Object.fromEntries(days.map((x) => [x, { total: 0, answered: 0, rejected: 0 }]));
@@ -1095,7 +1095,8 @@ const DISP_HELP = {
   CANCEL: 'The caller hung up before answer.',
   CONGESTION: 'Carrier answered 503 / congestion. Check carrier capacity and the reply in a SIP trace.',
   FAILED: 'Other failure. Look at the hangup cause and a SIP trace.',
-  SIP_DOWN: 'The trunk (or, inbound, the customer server) could not be reached: qualify failed or no reply. Check IP/port, firewall and the trunk state.',
+  SIP_DOWN: 'The trunk was down (no reply to the SIP OPTIONS ping) when the call failed. Check IP/port, firewall and the trunk state.',
+  REJECTED: 'The trunk is up but the call could not be set up (CHANUNAVAIL), e.g. the carrier answered 480 / cause 31. Check the hangup cause and a SIP trace.',
   CHANNEL_LIMIT: 'The process already had its channel limit of calls up. Raise the limit or lower customer concurrency.',
   TRUNK_LIMIT: 'The trunk max channels was full, or the trunk CPS limit stayed full for 3 s.',
   BLOCKED: 'Process inactive, or this call direction is switched off for it.',
@@ -1114,7 +1115,7 @@ PAGES.dispositions = async (main) => {
   main.innerHTML = `<div class="head"><div><h1>Dispositions</h1><p>Give any disposition your own code (shown in CDR, CSV, stats and the live feed) and choose the SIP response the customer gets when the distributor rejects a call.</p></div></div>
     <div class="panel"><div class="tw"><table><thead><tr><th>Internal code</th><th>Shown as</th><th>Label</th><th>Set by</th><th>SIP response</th><th>Meaning</th><th></th></tr></thead><tbody id="dBody"></tbody></table></div></div>
     <div class="panel"><h2>ISDN cause rules</h2>
-      <p class="hint">Unanswered calls: the hangup cause (Q.850) and the call status decide the disposition. <b>ANY</b> = CANCEL, NOANSWER, BUSY or CONGESTION; a rule for the exact status wins over ANY. CHANUNAVAIL stays SIP_DOWN unless a rule names it. No rule = the status as reported. Answered calls and the distributor's own rejects are never changed. Applies to new calls.</p>
+      <p class="hint">Unanswered calls: the hangup cause (Q.850) and the call status decide the disposition. <b>ANY</b> = CANCEL, NOANSWER, BUSY or CONGESTION; a rule for the exact status wins over ANY. CHANUNAVAIL is REJECTED (SIP_DOWN while the trunk is down) unless a rule names it. No rule = the status as reported. Answered calls and the distributor's own rejects are never changed. Applies to new calls.</p>
       <div class="tw"><table><thead><tr><th>ISDN cause</th><th>Call status</th><th>Disposition</th><th></th></tr></thead><tbody id="crBody"></tbody></table></div>
       <div class="mfoot" style="justify-content:space-between"><button type="button" class="btn sm" id="crAdd">+ Add rule</button>
         <span><span class="err" id="crErr"></span> <button type="button" class="btn primary" id="crSave">Save rules</button></span></div></div>`;

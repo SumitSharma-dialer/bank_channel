@@ -104,13 +104,15 @@ async function reconcile() {
 // ------------------------------------------------------------- call records
 const COL = { ANSWERED: 'answered', BUSY: 'busy', NO_ANSWER: 'no_answer', CANCEL: 'cancel', CONGESTION: 'congestion',
   FAILED: 'failed', CHANNEL_LIMIT: 'channel_limit', TRUNK_LIMIT: 'trunk_limit', BLOCKED: 'blocked',
-  NO_ROUTE: 'no_route', INVALID: 'invalid', OFF_HOURS: 'off_hours', NO_HEADER: 'no_header', INVALID_DID: 'invalid_did', SIP_DOWN: 'sip_down' };
+  NO_ROUTE: 'no_route', INVALID: 'invalid', OFF_HOURS: 'off_hours', NO_HEADER: 'no_header', INVALID_DID: 'invalid_did', SIP_DOWN: 'sip_down',
+  REJECTED: 'rejected' };
 const NOT_ON_TRUNK = new Set(['CHANNEL_LIMIT', 'BLOCKED', 'NO_ROUTE', 'INVALID', 'OFF_HOURS', 'NO_HEADER', 'INVALID_DID']);
 const HDR_STATUS = new Set(['none', 'ok', 'missing', 'bad_number', 'bad_did']);   // none = outbound call without headers
 const digits = (v, n) => (String(v || '').replace(/[^0-9]/g, '').slice(0, n) || null);
 
 async function saveCall(u) {
-  const disp = disposition(u.disp, u.cause);
+  const tst = (trunkState[u.trunk] || {}).endpoint;
+  const disp = disposition(u.disp, u.cause, tst === 'offline' || tst === 'unavailable');
   const end = +u.end || Math.floor(Date.now() / 1000);
   const start = +u.start || end;
   const bill = Math.max(0, parseInt(u.bill, 10) || 0);

@@ -17,7 +17,10 @@ test('hangup cause refines unanswered DIALSTATUS', () => {
 
 test('cause never overrides answered, SIP_DOWN or our own codes', () => {
   assert.strictEqual(disposition('ANSWER', '19'), 'ANSWERED');
-  assert.strictEqual(disposition('CHANUNAVAIL', '20'), 'SIP_DOWN', 'only cause 31 turns CHANUNAVAIL into CANCEL');
+  assert.strictEqual(disposition('CHANUNAVAIL', '20'), 'REJECTED', 'trunk up: CHANUNAVAIL is a carrier reject');
+  assert.strictEqual(disposition('CHANUNAVAIL', '20', true), 'SIP_DOWN', 'SIP_DOWN only while the trunk is down');
+  assert.strictEqual(disposition('CHANUNAVAIL', '31', true), 'SIP_DOWN', 'trunk down wins over cause rules');
+  assert.strictEqual(disposition('SIP_DOWN', '20'), 'SIP_DOWN');
   assert.strictEqual(disposition('NO_ROUTE', '34'), 'NO_ROUTE');
   assert.strictEqual(disposition('CHANNEL_LIMIT', '34'), 'CHANNEL_LIMIT');
 });
@@ -28,7 +31,7 @@ test('edited rules: exact status beats ANY, removed rule falls back to DIALSTATU
   assert.strictEqual(disposition('CANCEL', '19'), 'CANCEL');
   assert.strictEqual(disposition('NOANSWER', '19'), 'NO_ANSWER');
   assert.strictEqual(disposition('CHANUNAVAIL', '20'), 'NO_ANSWER', 'a rule may name CHANUNAVAIL');
-  assert.strictEqual(disposition('CHANUNAVAIL', '19'), 'SIP_DOWN', 'ANY never covers CHANUNAVAIL');
+  assert.strictEqual(disposition('CHANUNAVAIL', '19'), 'REJECTED', 'ANY never covers CHANUNAVAIL');
   assert.strictEqual(disposition('BUSY', '17'), 'BUSY', 'no rule = DIALSTATUS');
   assert.strictEqual(disposition('ANSWER', '19'), 'ANSWERED');
   setRules(DEFAULT_RULES);
