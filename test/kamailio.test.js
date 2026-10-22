@@ -77,11 +77,12 @@ test('data.lua is valid Lua', { skip: (() => { try { execFileSync('lua', ['-v'],
   } finally { fs.unlinkSync(f); }
 });
 
-test('dispatcher: trunks in set 1, fixed IPs of IP processes in set 2', () => {
+test('dispatcher: trunks in set 1, fixed IPs of processes in set 2', () => {
   const d = R.renderDispatcher([trunk], [ipProc, pwProc]);
   assert.ok(d.includes('1 sip:10.1.1.1:5061 0 0 duid=t_airtel1\n'));
   assert.ok(d.includes('2 sip:1.2.3.4:5080 0 0 duid=p_acme_1.2.3.4\n'));
-  assert.ok(!d.includes('5.6.7.0') && !d.includes('9.9.9.9'));
+  assert.ok(d.includes('2 sip:9.9.9.9:5060 0 0 duid=p_pw_9.9.9.9\n'), 'password process locked to a fixed IP: pinged');
+  assert.ok(!d.includes('5.6.7.0'));
 });
 
 test('uacreg: one row per registering trunk, ":" escaped', () => {

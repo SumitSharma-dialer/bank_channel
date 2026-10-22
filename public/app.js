@@ -509,27 +509,32 @@ PAGES.processes = async (main) => {
   clearInterval(S.regTimer);   // connection status every 15 s while this page is open
   S.regTimer = setInterval(() => { if (S.page !== 'processes') clearInterval(S.regTimer); else if (!document.hidden) bg(loadRegs); }, 15000);
 };
-// online / offline. password auth: online = registered to us
-// IP auth: online = customer server answers our OPTIONS ping (every 60 s)
+// online = any of: registered to us (password auth), a fixed IP answers our OPTIONS ping (every 60 s), or a call
+// from the customer in the last few minutes. Each reason that holds is listed in the tooltip.
 function regChip(p, st) {
   if (!st) return '<span class="chip">?</span>';
-  if (p.auth_type !== 'password') {
-    const fixed = p.allowed_ips.split(',').filter((x) => x && !x.includes('/'));
-    if (!p.active) return '<span class="chip">inactive</span>';
-    if (!fixed.length) return '<span class="chip" title="Only IP ranges (CIDR) are set — there is no single IP to ping">IP range</span>';
-    const r = st.reachable[p.code] || [];
-    const tip = r.map((x) => `${x.ip}:${x.port}: ${x.status === 'Avail' ? `reachable${x.rtt != null ? ` · ${x.rtt} ms` : ''}` : x.status === 'Unavail' ? 'no answer to OPTIONS ping' : 'not checked yet'}`).join('\n');
-    const up = r.filter((x) => x.status === 'Avail');
-    if (up.length) return `<span class="chip ok" title="Online — answers our SIP OPTIONS ping\n${esc(tip)}">online</span><br><small class="mono">${esc(up[0].ip)}:${up[0].port}${up[0].rtt != null ? ` · ${up[0].rtt} ms` : ''}</small>`;
-    if (r.some((x) => x.status === 'Unavail')) return `<span class="chip bad" title="Offline — ${esc(tip)}\nThe customer server does not answer SIP OPTIONS (down, firewall, or it ignores OPTIONS). Calls are not affected by this check.">offline</span>`;
-    return `<span class="chip" title="The SIP engine pings every 60 s — wait a minute">checking…</span>`;
-  }
-  const c = st.registered[p.code];
-  if (!c) return `<span class="chip bad" title="Offline — ${p.active ? 'the customer server has not registered (or its registration expired)' : 'Process inactive'}">offline</span>`;
-  const tip = c.map((x) => `${x.ip}${x.port ? ':' + x.port : ''}${x.userAgent ? ' · ' + x.userAgent : ''}${x.expiresIn != null ? ` · expires in ${x.expiresIn}s` : ''}`).join('\n');
-  const want = +p.sip_port || 5060, other = c.find((x) => x.port && x.port !== want);
-  const note = other ? `\nRegistered from port ${other.port}, the process says ${want} — calls follow the registration (${other.port}).` : '';
-  return `<span class="chip ok" title="Online — registered\n${esc(tip)}${esc(note)}">online</span><br><small class="mono">${esc(c[0].ip)}${c[0].port ? ':' + c[0].port : ''}${other ? ' <b title="differs from the process port">≠ ' + want + '</b>' : ''}</small>`;
+  if (!p.active) return '<span class="chip">inactive</span>';
+  const byPass = p.auth_type === 'password';
+  const fixed = p.allowed_ips.split(',').map((x) => x.trim()).filter((x) => x && !x.includes('/'));
+  const reg = byPass ? st.registered[p.code] || [] : [];
+  const r = st.reachable[p.code] || [];
+  const up = r.filter((x) => x.status === 'Avail');
+  const call = (st.lastCall || {})[p.code];
+  const want = +p.sip_port || 5060, other = reg.find((x) => x.port && x.port !== want);
+  const lines = [];
+  if (byPass) lines.push(reg.length ? 'Registered: ' + reg.map((x) => `${x.ip}${x.port ? ':' + x.port : ''}${x.userAgent ? ' · ' + x.userAgent : ''}${x.expiresIn != null ? ` · expires in ${x.expiresIn}s` : ''}`).join(', ')
+    : 'Not registered');
+  if (other) lines.push(`Registered from port ${other.port}, the process says ${want} — calls follow the registration (${other.port}).`);
+  if (fixed.length) lines.push(...(r.length ? r.map((x) => `OPTIONS ${x.ip}:${x.port}: ${x.status === 'Avail' ? `reachable${x.rtt != null ? ` · ${x.rtt} ms` : ''}` : x.status === 'Unavail' ? 'no answer' : 'not checked yet'}`)
+    : ['OPTIONS ping: not checked yet (every 60 s)']));
+  lines.push(call ? `Last call ${ago(Date.parse(call.at))} ago from ${call.ip || '?'} (${call.disposition || '?'})` : `No call in the last ${st.recentMin || 15} min`);
+  const tip = esc(lines.join('\n'));
+  const where = reg[0] ? `${reg[0].ip}${reg[0].port ? ':' + reg[0].port : ''}` : up[0] ? `${up[0].ip}:${up[0].port}${up[0].rtt != null ? ` · ${up[0].rtt} ms` : ''}` : call ? `${call.ip || ''} · call ${ago(Date.parse(call.at))} ago` : '';
+  const via = [reg.length && 'registered', up.length && 'ping', call && 'recent call'].filter(Boolean).join(' + ');
+  if (via) return `<span class="chip ok" title="Online (${via})\n${tip}">online</span><br><small class="mono">${esc(where)}${other ? ' <b title="differs from the process port">≠ ' + want + '</b>' : ''}</small>`;
+  if (!byPass && !fixed.length) return `<span class="chip" title="Only IP ranges (CIDR) are set — there is no single IP to ping\n${tip}">IP range</span>`;
+  if (fixed.length && !r.length) return `<span class="chip" title="The SIP engine pings every 60 s — wait a minute\n${tip}">checking…</span>`;
+  return `<span class="chip bad" title="Offline\n${tip}\nNot registered, no answer to SIP OPTIONS and no recent call (server down, firewall, or it ignores OPTIONS).">offline</span>`;
 }
 async function loadRegs() {   // refresh only the Registration cells
   const st = await api('GET', '/api/processes/status').catch(() => null);

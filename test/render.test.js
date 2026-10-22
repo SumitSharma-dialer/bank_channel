@@ -56,7 +56,10 @@ test('active ip process gets a monitor-only AOR + endpoint that pings fixed IPs 
   assert.ok(p.includes('aors=p_acme-mon\nidentify_by=ip\n') && !p.includes('endpoint=p_acme-mon'));
   assert.ok(!p.includes('qualify_frequency=60\n\n[p_acme]\ntype=aor'), 'the dialed AOR is not qualified');
   assert.ok(!renderProcesses([{ ...proc, auth_type: 'ip', allowed_ips: '1.2.3.4', active: false }]).includes('-mon]'));
-  assert.ok(!renderProcesses([proc]).includes('-mon]'), 'password process: none');
+  assert.ok(!renderProcesses([{ ...proc, allowed_ips: '' }]).includes('-mon]'), 'password process without IPs: none');
+  const pw = renderProcesses([{ ...proc, allowed_ips: '1.2.3.4,5.6.7.0/24' }]);
+  assert.ok(pw.includes('[p_acme-mon]\ntype=aor\ncontact=sip:1.2.3.4:5060\nqualify_frequency=60'), 'password process locked to a fixed IP: pinged');
+  assert.ok(pw.includes('[p_acme]\ntype=aor\nmax_contacts=1\nremove_existing=yes\n'), 'and keeps its registration AOR');
 });
 
 test('ip process: inbound AOR and OPTIONS ping use the customer SIP port', () => {

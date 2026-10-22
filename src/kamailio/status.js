@@ -80,7 +80,7 @@ async function registrations(trunks) {
   return out;
 }
 const registrar = async () => parseUsrloc(await safe(rpc('ul.dump')));
-// OPTIONS ping result per fixed IP of IP-auth processes, like reg.parseMonContacts()
+// OPTIONS ping result per fixed IP of processes, like reg.parseMonContacts()
 async function reachable() {
   const out = {};
   for (const d of parseDispatcher(await safe(rpc('dispatcher.list')))) {

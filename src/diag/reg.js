@@ -112,7 +112,7 @@ async function collect(traceLog) {
   return { at: now, rows };
 }
 
-// `pjsip show contacts` lines of the monitor-only AORs of IP processes (render.js [p_<code>-mon]):
+// `pjsip show contacts` lines of the monitor-only AORs of processes with fixed IPs (render.js [p_<code>-mon]):
 // "  Contact:  p_acme-mon/sip:1.2.3.4:5060   ef5ebf5494 Avail   12.345"  -> { acme: [{ ip, port, status: 'Avail', rtt: 12.3 }] }
 function parseMonContacts(out) {
   const r = {};
@@ -125,18 +125,27 @@ function parseMonContacts(out) {
 
 // cheap per-process view for the Processes page:
 // registered: code -> live (not expired) contacts the customer registered from (password auth)
-// reachable:  code -> OPTIONS ping result per fixed customer IP (IP auth)
+// reachable:  code -> OPTIONS ping result per fixed customer IP
+// lastCall:   code -> the newest call from the customer that ended in the last RECENT_CALL_MIN minutes
+const RECENT_CALL_MIN = 15;
 async function status() {
   const onKam = engine.name() === 'kamailio';
-  const [inReg, reachable] = onKam ? await Promise.all([kam.registrar(), kam.reachable()])
-    : await Promise.all([cli('database show registrar').then(parseRegistrar), cli('pjsip show contacts').then(parseMonContacts)]);
+  const [[inReg, reachable], recent] = await Promise.all([
+    onKam ? Promise.all([kam.registrar(), kam.reachable()])
+      : Promise.all([cli('database show registrar').then(parseRegistrar), cli('pjsip show contacts').then(parseMonContacts)]),
+    q(`SELECT DISTINCT ON (process_code) process_code, src_ip, disposition, coalesce(end_time, start_time) AS at FROM calls
+        WHERE start_time > now() - interval '1 day' AND coalesce(end_time, start_time) > now() - make_interval(mins => $1)
+        ORDER BY process_code, start_time DESC`, [RECENT_CALL_MIN]).catch(() => ({ rows: [] })),
+  ]);
+  const lastCall = {};
+  for (const r of recent.rows) lastCall[r.process_code] = { at: r.at, ip: r.src_ip, disposition: r.disposition };
   const now = Date.now(), registered = {};
   for (const [code, list] of Object.entries(inReg)) {
     const live = list.map(({ ip, port, userAgent, expiresAt }) => ({ ip, port, userAgent, expiresIn: expiresAt ? Math.round((expiresAt - now) / 1000) : null }))
       .filter((c) => c.expiresIn == null || c.expiresIn > 0);
     if (live.length) registered[code] = live;
   }
-  return { registered, reachable };
+  return { registered, reachable, lastCall, recentMin: RECENT_CALL_MIN };
 }
 
 module.exports = { collect, status, parseMonContacts, parseRegistrations, parseRegistrar, lastLogLine, lastPacket };

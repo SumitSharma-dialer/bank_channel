@@ -192,7 +192,8 @@ router.get('/suggest', wrap(async (req, res) => {
 }));
 
 // registered: code -> contacts the customer registered from (password auth; missing = not registered)
-// reachable:  code -> OPTIONS ping result per fixed IP (IP auth)
+// reachable:  code -> OPTIONS ping result per fixed IP
+// lastCall:   code -> newest call from the customer in the last few minutes
 router.get('/status', wrap(async (req, res) => {
   res.json(await require('../diag/reg').status());
 }));

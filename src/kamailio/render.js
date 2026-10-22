@@ -135,7 +135,7 @@ function renderData(trunks, processes, opts) {
   return HEADER('--', 'Trunks, processes and DID ranges for sipdist.lua (Kamailio)') + 'return ' + lua(buildData(trunks, processes, opts)) + '\n';
 }
 
-// OPTIONS ping targets (dispatcher): set 1 = trunks, set 2 = fixed IPs of IP-auth processes (monitor only, never used
+// OPTIONS ping targets (dispatcher): set 1 = trunks, set 2 = fixed IPs of processes (monitor only, never used
 // for routing). Kamailio pings every 60 s; `dispatcher.list` then says active / inactive.
 function renderDispatcher(trunks, processes, o) {
   let out = HEADER('#', 'OPTIONS ping targets: setid destination flags priority attrs');
@@ -144,7 +144,7 @@ function renderDispatcher(trunks, processes, o) {
     out += `1 sip:${clean(t.host)}:${+t.port || 5060}${t.transport === 'tcp' ? ';transport=tcp' : ''} 0 0 duid=t_${t.name}` +
       `${src ? `;socket=${sockOf(t, src, o)}` : ''}\n`;
   }
-  for (const p of processes.filter((x) => x.active && x.auth_type === 'ip')) {
+  for (const p of processes.filter((x) => x.active)) {
     for (const i of ips(p.allowed_ips).filter((x) => IP_RE.test(x))) out += `2 sip:${i}:${+p.sip_port || 5060} 0 0 duid=p_${p.code}_${i}\n`;
   }
   return out;
