@@ -181,8 +181,8 @@ exten => s,1,Set(PJSIP_HEADER(add,X-DID)=\${ARG1})
 
 [sd-from-trunk]
 ; Carriers may not send calls in — reject
-exten => _.,1,Hangup(21)
-exten => h,1,Hangup()   ; explicit h that ends execution: with only "_." Asterisk would run the reject code at hangup
+exten => _!,1,Hangup(21)
+exten => h,1,Hangup()   ; explicit h that ends execution: with only "_!" Asterisk would run the reject code at hangup
 
 `;
 }
@@ -196,8 +196,10 @@ const ENTRY = (code, trunkName) =>
   ` same => n,Set(SD_SRC=\${CHANNEL(pjsip,remote_addr)})\n` +
   ` same => n,Set(CHANNEL(hangup_handler_push)=sd-hangup,s,1)\n`;
 
+// '_!' = catch-all like '_.' (lowest priority, matches anything) without Asterisk's "'_.' is discouraged" warning;
+// '_X.' would stop catching non-digit numbers
 function reject(code, trunkName, disp, comment) {
-  return `exten => _.,1,NoOp(${comment} -> ${rejectSip[disp]})\n` + ENTRY(code, trunkName) + hangup(disp);
+  return `exten => _!,1,NoOp(${comment} -> ${rejectSip[disp]})\n` + ENTRY(code, trunkName) + hangup(disp);
 }
 
 // limits -> number -> caller ID -> Dial -> limit labels. num = dialplan expression of the number to send,
@@ -302,7 +304,7 @@ function renderDialplan(processes, trunks, tz, routeUrl, rejectCodes) {
   for (const p of processes) {
     assertName(p.code, 'process');
     const t = p.trunk_id ? byId.get(p.trunk_id) : null;
-    // explicit h ending in Hangup(): otherwise the catch-all '_.' below runs at hangup (h,1 or falling through to h,2)
+    // explicit h ending in Hangup(): otherwise the catch-all '_!' below runs at hangup (h,1 or falling through to h,2)
     // and overwrites SD_DISP with INVALID
     out += `[proc-${p.code}]\n; ${clean(p.name)} — limit ${p.channel_limit}, trunk ${t ? t.name : '(none)'}\nexten => h,1,Hangup()\n`;
 
