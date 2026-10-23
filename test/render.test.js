@@ -181,7 +181,7 @@ test('outbound: dummy number with X-DID + X-Number, or customer number with call
   assert.ok(dp.includes('exten => 9876543210,1,'), 'dummy number extension');
   assert.ok(dp.includes('exten => _X.,1,') && dp.includes('exten => _+X.,1,'), 'caller-ID dialing');
   assert.ok(dp.includes('Set(SD_HDID=${FILTER(0-9a-zA-Z+.,${CALLERID(num)})})') && dp.includes('Set(SD_HNUM=${FILTER(0-9a-zA-Z+.,${EXTEN})})'));
-  assert.ok(/exten => _!,1,NoOp\(dialed number is not a phone number[\s\S]*SD_DISP=INVALID/.test(dp), 'other numbers -> INVALID');
+  assert.ok(/exten => _\[#-~\]!,1,NoOp\(dialed number is not a phone number[\s\S]*SD_DISP=INVALID/.test(dp), 'other numbers -> INVALID');
   assert.ok(dp.includes('PJSIP_HEADER(read,X-DID)') && dp.includes('PJSIP_HEADER(read,X-Number)'));
   assert.ok(!dp.includes('?plain'), 'headers are mandatory');
   assert.ok(dp.includes('Set(CALLERID(all)=${SD_DID} <${SD_DID}>)'));
@@ -192,9 +192,9 @@ test('outbound: dummy number with X-DID + X-Number, or customer number with call
   assert.ok(!none.includes('PJSIP_HEADER(read') && none.includes('exten => _X.,1,'), 'no dummy number -> caller-ID dialing only');
 });
 
-test("contexts with a catch-all '_!' have an explicit h extension", () => {
+test("contexts with a catch-all '_[#-~]!' have an explicit h extension", () => {
   const dp = renderDialplan([proc, { ...proc, id: 2, code: 'off', active: false }], [trunk]);
-  for (const ctx of dp.split(/\n(?=\[)/).filter((c) => c.includes('exten => _!,1')))
+  for (const ctx of dp.split(/\n(?=\[)/).filter((c) => c.includes('exten => _[#-~]!,1')))
     assert.ok(ctx.includes('exten => h,1,Hangup()'), ctx.split('\n')[0]);
 });
 
