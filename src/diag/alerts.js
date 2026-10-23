@@ -39,6 +39,7 @@ const TYPES = [
   { type: 'sip_down', severity: 'critical', label: 'SIP trunk down', about: 'Trunk does not answer SIP OPTIONS.' },
   { type: 'reg', severity: 'critical', label: 'Trunk not registered', about: 'Carrier rejects the registration.' },
   { type: 'sipdown_calls', severity: 'critical', label: 'SIP_DOWN calls on a trunk', about: 'Calls could not reach the trunk (last 15 min).' },
+  { type: 'rejectall', severity: 'critical', label: 'Trunk rejecting every call', about: '0 answered, ≥90% of ≥8 calls rejected/failed (last 5 min).' },
   { type: 'failrate', severity: 'critical', label: 'High failure rate on a trunk', about: '≥50% of ≥10 calls failed (last 15 min).' },
   { type: 'trunk_full', severity: 'warning', label: 'Trunk near its channel limit', about: '≥90% of max channels in use.' },
   { type: 'proc_full', severity: 'warning', label: 'Process near its channel limit', about: '≥90% of the process limit in use.' },

@@ -84,7 +84,40 @@ async function checks() {
     else if (reached >= 30 && (d.ANSWERED || 0) / reached < 0.05) add(`lowasr:${name}`, 'warning', `Very low ASR on trunk ${name}`,
       `${d.ANSWERED || 0} of ${reached} calls answered in the last ${WINDOW_MIN} min.`, 'Check number format (prefix / strip digits) and caller ID acceptance with the carrier.');
   }
+  await rejectAllChecks(add);
   return out;
+}
+
+// Trunk rejecting every call: fast check over the last REJECT_MIN minutes, ≥ REJECT_MIN_CALLS calls that went to the
+// carrier, none answered and ≥ 90% failed (REJECTED / CONGESTION / FAILED / SIP_DOWN). Catches a carrier-side bar
+// (e.g. 183 then 487 on every call) while the 15-min failrate check still averages in the calls from before.
+const REJECT_MIN = 5;
+const REJECT_MIN_CALLS = 8;
+const CARRIER_FAIL = ['REJECTED', 'CONGESTION', 'FAILED', 'SIP_DOWN'];
+const CARRIER = ['ANSWERED', 'BUSY', 'NO_ANSWER', ...CARRIER_FAIL];   // CANCEL = caller hung up, says nothing about the trunk
+async function rejectAllChecks(add) {
+  const { rows } = await q(`SELECT trunk_name, disposition, hangup_cause, count(*)::int AS n FROM calls
+    WHERE start_time > now() - interval '${REJECT_MIN} minutes' AND trunk_name IS NOT NULL AND disposition = ANY($1)
+    GROUP BY 1,2,3`, [CARRIER]);
+  const by = {};
+  for (const r of rows) {
+    const t = by[r.trunk_name] || (by[r.trunk_name] = { total: 0, answered: 0, failed: 0, causes: {} });
+    t.total += r.n;
+    if (r.disposition === 'ANSWERED') t.answered += r.n;
+    if (CARRIER_FAIL.includes(r.disposition)) {
+      t.failed += r.n;
+      const k = `${r.disposition}/${r.hangup_cause ?? '?'}`;
+      t.causes[k] = (t.causes[k] || 0) + r.n;
+    }
+  }
+  for (const [name, t] of Object.entries(by)) {
+    if (t.total < REJECT_MIN_CALLS || t.answered || t.failed / t.total < 0.9) continue;
+    const top = Object.entries(t.causes).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, n]) => `${k} ×${n}`).join(', ');
+    add(`rejectall:${name}`, 'critical', `Trunk ${name} is rejecting every call`,
+      `${t.failed} of ${t.total} calls failed, 0 answered in the last ${REJECT_MIN} min (disposition/cause: ${top}).`,
+      'Carrier-side problem if registration and OPTIONS are fine (account bar, balance, CLI/DID blocked): ' +
+      'run a SIP trace on the carrier IP for the final response / Warning header and raise it with the carrier.');
+  }
 }
 
 async function load() {
