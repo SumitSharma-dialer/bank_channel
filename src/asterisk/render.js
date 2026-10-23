@@ -184,6 +184,34 @@ exten => s,1,Set(PJSIP_HEADER(add,X-DID)=\${ARG1})
 exten => _[#-~]!,1,Hangup(21)
 exten => h,1,Hangup()   ; explicit h that ends execution: with only the catch-all Asterisk would run the reject code at hangup
 
+[sd-testcall]
+; Test call from the SIP trunks page (src/testcall.js), originated as Local/<id>-<trunk>-<number>-<cli>@sd-testcall/n:
+; the ;2 half dials the trunk, the ;1 half (exten echo) echoes the answered call back for up to 30 s.
+exten => echo,1,Set(TIMEOUT(absolute)=30)
+ same => n,Answer()
+ same => n,Echo()
+ same => n,Hangup()
+exten => _[#-~]!,1,Set(SDT_ID=\${CUT(EXTEN,-,1)})
+ same => n,Set(CALLERID(all)=\${CUT(EXTEN,-,4)} <\${CUT(EXTEN,-,4)}>)
+ same => n,Set(CHANNEL(hangup_handler_push)=sd-testcall-end,s,1)
+ same => n,Dial(PJSIP/\${CUT(EXTEN,-,3)}@t_\${CUT(EXTEN,-,2)},45,b(sd-testcall-leg^s^1(\${SDT_ID})))
+ same => n,Hangup()
+exten => h,1,Hangup()
+
+[sd-testcall-leg]
+; pre-dial on the trunk leg: tell Node its channel id (ringing / answered is polled on it)
+exten => s,1,UserEvent(SIPDIST_TEST,id: \${ARG1},leg: \${UNIQUEID})
+ same => n,Return()
+
+[sd-testcall-end]
+; hangup handler of the dialing half: result + the carrier's SIP reply (e.g. "SIP 487 Request Terminated")
+exten => s,1,Set(K=\${CUT(HANGUPCAUSE_KEYS(),\\,,1)})
+ same => n,GotoIf($["\${K}" = ""]?done)
+ same => n,Set(TECH=\${HANGUPCAUSE(\${K},tech)})
+ same => n,Set(Q850=\${HANGUPCAUSE(\${K},ast)})
+ same => n(done),UserEvent(SIPDIST_TEST,id: \${SDT_ID},end: 1,dialstatus: \${DIALSTATUS},bill: \${ANSWEREDTIME},tech: \${TECH},cause: \${Q850})
+ same => n,Return()
+
 `;
 }
 

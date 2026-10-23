@@ -3,6 +3,7 @@ const router = require('express').Router();
 const { q, pool, audit } = require('../db');
 const { apply } = require('../engine');
 const tracker = require('../tracker');
+const testcall = require('../testcall');
 const { Bad, wrap, str, int, bool, name, diff, HOST_RE, codecs, safeText } = require('./util');
 
 const PUBLIC_COLS = `t.id,t.name,t.description,t.host,t.port,t.transport,t.username,
@@ -147,6 +148,30 @@ router.post('/:id/active', wrap(async (req, res) => {
   const r = await q('UPDATE trunks SET active=$1, updated_at=now() WHERE id=$2 RETURNING name', [active, id]);
   if (!r.rowCount) return res.status(404).json({ error: 'not found' });
   res.json({ apply: await changed(req, active ? 'activate' : 'deactivate', id, { name: r.rows[0].name }) });
+}));
+
+// test call out of the trunk: body { number, did }; did blank = first caller-ID DID of the trunk
+router.post('/:id/test-call', wrap(async (req, res) => {
+  const id = int(req.params.id, { min: 1 });
+  const t = (await q('SELECT * FROM trunks WHERE id=$1', [id])).rows[0];
+  if (!t) return res.status(404).json({ error: 'not found' });
+  let did = str(req.body.did, 20);
+  if (!did) {
+    const r = (await q('SELECT first_did FROM trunk_did_ranges WHERE trunk_id=$1 ORDER BY use_as_cli DESC, first_did LIMIT 1', [id])).rows[0];
+    if (!r) throw new Bad('enter a caller ID: this trunk has no DIDs');
+    did = r.first_did;
+  }
+  const test = await testcall.start(t, str(req.body.number, 20), did);
+  await audit(req.user, 'test_call', 'trunk', id, { name: t.name, number: test.number, cli: test.cli });
+  res.status(201).json(test);
+}));
+router.get('/test-call/:tid', wrap(async (req, res) => {
+  const t = testcall.get(req.params.tid);
+  t ? res.json(t) : res.status(404).json({ error: 'test call not found' });
+}));
+router.post('/test-call/:tid/hangup', wrap(async (req, res) => {
+  const t = await testcall.hangup(req.params.tid);
+  t ? res.json(t) : res.status(404).json({ error: 'test call not found' });
 }));
 
 router.delete('/:id', wrap(async (req, res) => {

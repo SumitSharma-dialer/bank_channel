@@ -343,7 +343,8 @@ function drawTrunks() {
     return `<section class="panel tcard${t.active ? '' : ' off'}">
       <header class="tc-head">
         <div class="tc-title"><b>${esc(t.name)}</b>${trunkStatus({ ...L, active: t.active })}<small>${esc(t.description || '')}</small></div>
-        <div class="ops"><button class="btn sm" data-edit="${t.id}">Edit</button>
+        <div class="ops"><button class="btn sm" data-test="${t.id}" ${t.active ? '' : 'disabled title="trunk is inactive"'}>Test call</button>
+          <button class="btn sm" data-edit="${t.id}">Edit</button>
           <button class="btn sm" data-toggle="${t.id}">${t.active ? 'Deactivate' : 'Activate'}</button>
           <button class="btn sm danger" data-del="${t.id}">Delete</button></div>
       </header>
@@ -369,6 +370,7 @@ function drawTrunks() {
 
   const find = (b, k) => S.trunks.find((x) => x.id === +b.dataset[k]);
   $$('[data-edit]', box).forEach((b) => (b.onclick = () => trunkForm(find(b, 'edit'))));
+  $$('[data-test]', box).forEach((b) => (b.onclick = () => testCall(find(b, 'test'))));
   $$('[data-did]', box).forEach((b) => (b.onclick = () => {
     const id = +b.dataset.did, open = !didOpen.has(id);
     open ? didOpen.add(id) : didOpen.delete(id); saveDidOpen();
@@ -387,6 +389,46 @@ function drawTrunks() {
     try { applyToast(await api('DELETE', `/api/trunks/${t.id}`), 'Trunk'); loadTrunks(); } catch (e) { toast(e.message, true); }
   }));
 }
+// one test call out of a trunk (src/testcall.js): answered = echo test; shows ringing / answer and the carrier's SIP reply
+function testCall(t) {
+  const dids = (t.did_ranges || []).filter((r) => r.use_as_cli).concat((t.did_ranges || []).filter((r) => !r.use_as_cli));
+  let timer = null, cur = null;
+  openModal(`Test call · ${t.name}`, `<form id="tcf"><div class="fgrid">
+    <label>Number to call <small>10 digits; the trunk's prefix / strip digits are applied like a live call</small><input name="number" required inputmode="tel" pattern="[+0-9 ]{10,20}" placeholder="98xxxxxxxx"></label>
+    <label>Caller ID (DID) <small>${dids.length ? 'blank = first DID of the trunk' : 'this trunk has no DIDs — enter one'}</small><input name="did" inputmode="tel" pattern="[+0-9 ]{4,20}" value="${esc(dids[0] ? dids[0].first_did : '')}" ${dids.length ? '' : 'required'}></label>
+    <p class="hint full">Rings up to 45 s. When answered you hear yourself (echo, up to 30 s): audio works both ways. Not counted in reports.</p>
+    <div class="full tc-log" id="tcLog" hidden></div>
+  </div><p class="err" id="tcErr"></p><div class="mfoot"><button type="button" class="btn" data-close>Close</button>
+    <button type="button" class="btn danger hidden" id="tcHang">Hang up</button><button class="btn primary" id="tcGo">Call</button></div></form>`, (c) => {
+    const f = $('#tcf', c), logBox = $('#tcLog', c), go = $('#tcGo', c), hang = $('#tcHang', c), err = $('#tcErr', c);
+    const stop = () => { clearInterval(timer); timer = null; };
+    const draw = (x) => {
+      cur = x;
+      const t0 = x.startedAt;
+      const res = x.result ? `<div class="tc-res">${x.result.ok ? '<span class="chip ok">answered</span>' : `<span class="chip bad">${esc(x.result.dialstatus)}</span>`}
+        ${x.result.sip ? ` <b class="mono">${esc(x.result.sip)}</b>` : ''}${x.result.cause ? ` <small>cause ${esc(x.result.cause)}</small>` : ''}</div>` : '';
+      logBox.hidden = false;
+      logBox.innerHTML = x.events.map((e) => `<div><span class="mono">+${((e.at - t0) / 1000).toFixed(1)}s</span> ${esc(e.msg)}</div>`).join('') + res;
+      hang.classList.toggle('hidden', !!x.endedAt);
+      go.disabled = !x.endedAt;
+      if (x.endedAt) stop();
+    };
+    const poll = async () => {
+      if (!document.body.contains(logBox)) return stop();   // modal closed: the call keeps its own time limit
+      try { draw(await api('GET', `/api/trunks/test-call/${cur.id}`)); } catch (e) { err.textContent = e.message; stop(); }
+    };
+    f.onsubmit = async (ev) => {
+      ev.preventDefault(); err.textContent = '';
+      go.disabled = true;
+      try {
+        draw(await api('POST', `/api/trunks/${t.id}/test-call`, { number: f.number.value.trim(), did: f.did.value.trim() }));
+        stop(); timer = setInterval(poll, 1000);
+      } catch (e) { err.textContent = e.message; go.disabled = false; }
+    };
+    hang.onclick = async () => { try { draw(await api('POST', `/api/trunks/test-call/${cur.id}/hangup`)); } catch (e) { err.textContent = e.message; } };
+  });
+}
+
 async function trunkForm(t, opt = {}) {
   const procs = await api('GET', '/api/processes');
   const v = t || { allow_inbound: true, port: 5060, transport: 'udp', register: true, max_channels: 30, cps: 0, strip_digits: 0, prefix: '', cli_prefix: '', codecs: 'ulaw,alaw', dial_timeout: 60, active: true };

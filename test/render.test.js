@@ -114,7 +114,7 @@ test('trunk cps paces outbound calls, 0 = no cps gate', () => {
   assert.ok(d.includes('GROUP_COUNT(${SD_CPSG}@sdcps)} <= 5]?cpsok'));
   assert.ok(d.includes('GotoIf($[${SD_CPSW} > 30]?tcps)') && d.includes('n(tcps),Set(SD_DISP=TRUNK_LIMIT)'));
   assert.ok(d.indexOf('Set(GROUP(sdcps)') < d.indexOf('GROUP_COUNT(${SD_CPSG}'), 'join before count');
-  assert.ok(d.indexOf('?tlimit') < d.indexOf('n(cps)') && d.indexOf('n(cpsok)') < d.indexOf('Dial('), 'after channel limits, before Dial');
+  assert.ok(d.indexOf('?tlimit') < d.indexOf('n(cps)') && d.indexOf('n(cpsok)') < d.indexOf('Dial(', d.indexOf('[proc-')), 'after channel limits, before Dial');
 });
 
 test('config injection is stripped', () => {
@@ -215,4 +215,12 @@ test('peer config: pjsip.conf + extensions.conf as separate files, from_user sta
   assert.ok(ext.startsWith('[from-internal-sipdist]\n') && ext.includes('Set(CALLERID(num)=1234)') && ext.includes(' same => n,Dial(PJSIP/${EXTEN}@sipdist,60)') && ext.includes('[from-sipdist]'));
   assert.ok(pj.includes('send_pai=yes') && c.chan_sip.includes('sendrpid=pai') && c.chan_sip.includes('Dial(SIP/${EXTEN}@sipdist,60)'), 'DID also sent as P-Asserted-Identity');
   assert.ok(c.pjsip.startsWith('pjsip.conf\n\n[sipdist]') && c.pjsip.includes('\n\nextensions.conf\n\n[from-internal-sipdist]'));
+});
+
+test('test-call contexts: dial the trunk from the Local extension, report leg + result by UserEvent', () => {
+  const dp = renderDialplan([], [trunk]);
+  assert.ok(dp.includes('[sd-testcall]\n') && dp.includes('exten => echo,1,Set(TIMEOUT(absolute)=30)'));
+  assert.ok(dp.includes('Dial(PJSIP/${CUT(EXTEN,-,3)}@t_${CUT(EXTEN,-,2)},45,b(sd-testcall-leg^s^1(${SDT_ID})))'));
+  assert.ok(dp.includes('Set(K=${CUT(HANGUPCAUSE_KEYS(),\\,,1)})'), 'first hangup-cause key, escaped comma');
+  assert.ok(/\[sd-testcall-end\][\s\S]*UserEvent\(SIPDIST_TEST,id: \$\{SDT_ID\},end: 1,dialstatus: \$\{DIALSTATUS\}/.test(dp));
 });
