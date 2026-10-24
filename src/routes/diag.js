@@ -2,6 +2,7 @@
 // Diagnostics: issue tracker, live SIP trace (sngrep-like), pcap download (tcpdump), RTP analysis, Asterisk log search.
 const router = require('express').Router();
 const dns = require('dns').promises;
+const net = require('net');
 const { execFile } = require('child_process');
 const cfg = require('../config');
 const ari = require('../ari');
@@ -59,6 +60,14 @@ router.get('/target', wrap(async (req, res) => res.json(await target(req.query))
 
 router.get('/status', wrap(async (req, res) => {
   res.json({ tools: cap.tools(), trace: cap.trace.status(), rtpRange: cfg.rtp, sipPort: cfg.sipPort, log: engine.name() === 'kamailio' ? 'journalctl -u kamailio' : cfg.asterisk.log, engine: engine.name() });
+}));
+
+// connection check (SIP trunks / Processes pages): body { host, port } -> ping, TCP, UDP (src/netcheck.js)
+router.post('/netcheck', wrap(async (req, res) => {
+  const host = str(req.body.host, 253).trim();
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9.\-]{0,252}$/.test(host) && !(net.isIP(host))) throw new Bad('host: IP address or host name');
+  const port = int(req.body.port, { min: 1, max: 65535, def: 5060 });
+  res.json(await require('../netcheck').check(host, port));
 }));
 
 // ------------------------------------------------------------------ issues

@@ -343,7 +343,8 @@ function drawTrunks() {
     return `<section class="panel tcard${t.active ? '' : ' off'}">
       <header class="tc-head">
         <div class="tc-title"><b>${esc(t.name)}</b>${trunkStatus({ ...L, active: t.active })}<small>${esc(t.description || '')}</small></div>
-        <div class="ops"><button class="btn sm" data-test="${t.id}" ${t.active ? '' : 'disabled title="trunk is inactive"'}>Test call</button>
+        <div class="ops"><button class="btn sm" data-net="${t.id}">Check connection</button>
+          <button class="btn sm" data-test="${t.id}" ${t.active ? '' : 'disabled title="trunk is inactive"'}>Test call</button>
           <button class="btn sm" data-edit="${t.id}">Edit</button>
           <button class="btn sm" data-toggle="${t.id}">${t.active ? 'Deactivate' : 'Activate'}</button>
           <button class="btn sm danger" data-del="${t.id}">Delete</button></div>
@@ -371,6 +372,7 @@ function drawTrunks() {
   const find = (b, k) => S.trunks.find((x) => x.id === +b.dataset[k]);
   $$('[data-edit]', box).forEach((b) => (b.onclick = () => trunkForm(find(b, 'edit'))));
   $$('[data-test]', box).forEach((b) => (b.onclick = () => testCall(find(b, 'test'))));
+  $$('[data-net]', box).forEach((b) => (b.onclick = () => { const t = find(b, 'net'); netCheck(t.name, [t.host], t.port || 5060, t.transport); }));
   $$('[data-did]', box).forEach((b) => (b.onclick = () => {
     const id = +b.dataset.did, open = !didOpen.has(id);
     open ? didOpen.add(id) : didOpen.delete(id); saveDidOpen();
@@ -389,6 +391,30 @@ function drawTrunks() {
     try { applyToast(await api('DELETE', `/api/trunks/${t.id}`), 'Trunk'); loadTrunks(); } catch (e) { toast(e.message, true); }
   }));
 }
+// connection check (src/netcheck.js): ping, TCP connect + SIP OPTIONS, UDP SIP OPTIONS from this server to host:port
+function netCheck(name, hosts, port, transport) {
+  hosts = [...new Set(hosts.filter(Boolean))];
+  const chip = (r) => (r.ok ? '<span class="chip ok">OK</span>' : r.ok === null ? '<span class="chip warn">no reply</span>' : '<span class="chip bad">FAIL</span>');
+  const row = (label, r) => `<tr><td><b>${label}</b></td><td>${chip(r)}</td><td>${esc(r.text)}${r.sip ? `<br><span class="mono">SIP ${esc(r.sip)}</span>` : ''}</td></tr>`;
+  openModal(`Check connection · ${name}`, `<form id="ncf"><div class="fgrid">
+    <label>Host / IP${hosts.length > 1 ? ` <small>${hosts.length} addresses</small>` : ''}<input name="host" required list="ncHosts" value="${esc(hosts[0] || '')}" placeholder="10.0.0.1"><datalist id="ncHosts">${hosts.map((h) => `<option value="${esc(h)}">`).join('')}</datalist></label>
+    <label>Port${transport ? ` <small>trunk uses ${esc(String(transport).toUpperCase())}</small>` : ''}<input name="port" type="number" min="1" max="65535" required value="${+port || 5060}"></label>
+    <p class="hint full">From this server: ping (ICMP), TCP connect, and a SIP OPTIONS over TCP and UDP. UDP is sent from a random port (not 5060), so a far end that only answers known ports can show "no reply" while calls still work.</p>
+    <div class="full" id="ncOut"></div>
+  </div><p class="err" id="ncErr"></p><div class="mfoot"><button type="button" class="btn" data-close>Close</button><button class="btn primary" id="ncGo">Check</button></div></form>`, (c) => {
+    const f = $('#ncf', c), out = $('#ncOut', c), go = $('#ncGo', c), err = $('#ncErr', c);
+    f.onsubmit = async (ev) => {
+      ev.preventDefault(); err.textContent = ''; go.disabled = true;
+      out.innerHTML = '<p class="hint">Checking… (up to 8 s)</p>';
+      try {
+        const r = await api('POST', '/api/diag/netcheck', { host: f.host.value.trim(), port: f.port.value });
+        out.innerHTML = `<div class="tw"><table><tbody>${row('Ping', r.ping)}${row(`TCP ${r.port}`, r.tcp)}${row(`UDP ${r.port}`, r.udp)}</tbody></table></div>`;
+      } catch (e) { out.innerHTML = ''; err.textContent = e.message; }
+      go.disabled = false;
+    };
+  });
+}
+
 // one test call out of a trunk (src/testcall.js): answered = echo test; shows ringing / answer and the carrier's SIP reply
 function testCall(t) {
   const dids = (t.did_ranges || []).filter((r) => r.use_as_cli).concat((t.did_ranges || []).filter((r) => !r.use_as_cli));
@@ -605,6 +631,7 @@ async function loadProcs() {
         <button class="btn sm" data-peer="${p.id}">Peer config</button>
         <button class="btn sm" data-hlog="${p.id}">Header log</button>
         <button class="btn sm" data-limit="${p.id}">Limit</button>
+        <button class="btn sm" data-net="${p.id}">Check connection</button>
         <button class="btn sm" data-edit="${p.id}">Edit</button>
         <button class="btn sm" data-toggle="${p.id}">${p.active ? 'Deactivate' : 'Activate'}</button>
         <button class="btn sm danger" data-del="${p.id}">Delete</button></div></td></tr>`;
@@ -614,6 +641,12 @@ async function loadProcs() {
   $$('[data-peer]', body).forEach((b) => (b.onclick = () => peerConfig(find(b, 'peer'))));
   $$('[data-hlog]', body).forEach((b) => (b.onclick = () => headerLog(find(b, 'hlog'))));
   $$('[data-limit]', body).forEach((b) => (b.onclick = () => limitForm(find(b, 'limit'))));
+  $$('[data-net]', body).forEach((b) => (b.onclick = () => {
+    const p = find(b, 'net');   // fixed IPs (not ranges), then where it registered from
+    const fixed = p.allowed_ips.split(',').map((x) => x.trim()).filter((x) => x && !x.includes('/'));
+    const regd = ((reg && reg.registered[p.code]) || []).map((x) => x.ip);
+    netCheck(p.name, fixed.concat(regd), +p.sip_port || 5060);
+  }));
   $$('[data-toggle]', body).forEach((b) => (b.onclick = async () => {
     const p = find(b, 'toggle');
     try { applyToast(await api('POST', `/api/processes/${p.id}/active`, { active: !p.active }), 'Process'); loadProcs(); } catch (e) { toast(e.message, true); }
