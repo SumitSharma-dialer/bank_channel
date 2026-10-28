@@ -2,6 +2,7 @@
 const router = require('express').Router();
 const cfg = require('../config');
 const { execFile } = require('child_process');
+const os = require('os');
 const { q, pool, audit } = require('../db');
 const { apply } = require('../engine');
 const { peerConfig } = require('../asterisk/render');
@@ -225,11 +226,16 @@ const PRIVATE_RE = /^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|127\.)/;
 const srcFor = (ip) => new Promise((resolve) => {
   execFile('ip', ['-o', 'route', 'get', ip], { timeout: 2000 }, (err, out) => resolve(err ? null : (/\bsrc (\d+\.\d+\.\d+\.\d+)/.exec(out) || [])[1] || null));
 });
+// all private IPv4s of this server, so the peer config can offer each even when the customer's IPs are public / unset
+const ownPrivate = () => Object.values(os.networkInterfaces()).flat()
+  .filter((i) => i && i.family === 'IPv4' && !i.internal && PRIVATE_RE.test(i.address)).map((i) => i.address);
 async function serverAddress(p, via) {
   const ips = String(p.allowed_ips || '').split(/[\s,]+/).map((x) => x.split('/')[0]).filter((x) => IP_RE.test(x));
-  const privateIp = ips.length && ips.every((x) => PRIVATE_RE.test(x)) ? await srcFor(ips[0]) : null;
-  const usePrivate = via === 'private' ? !!privateIp : via === 'public' ? false : !!privateIp;
-  return { server: usePrivate ? privateIp : cfg.publicIp, via: usePrivate ? 'private' : 'public', privateIp };
+  const routed = ips.length && ips.every((x) => PRIVATE_RE.test(x)) ? await srcFor(ips[0]) : null;
+  const privateIps = [...new Set([routed, ...ownPrivate()].filter(Boolean))];
+  // via: 'public' | 'private' (first private) | one of privateIps; default private only for an all-private customer
+  const pick = via === 'public' ? null : privateIps.includes(via) ? via : via === 'private' ? privateIps[0] || null : routed;
+  return { server: pick || cfg.publicIp, via: pick ? 'private' : 'public', privateIp: pick || privateIps[0] || null, privateIps };
 }
 
 router.get('/:id/peer-config', wrap(async (req, res) => {

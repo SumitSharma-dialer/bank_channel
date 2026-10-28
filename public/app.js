@@ -869,7 +869,8 @@ async function procForm(p) {
 async function peerConfig(p, via) {
   const c = await api('GET', `/api/processes/${p.id}/peer-config${via ? `?via=${via}` : ''}`);
   // private customer network -> our private IP; switch to the public IP if the customer reaches us over the internet
-  const viaSw = c.privateIp ? `<div class="tabs" style="margin:0 0 10px"><button data-via="private" class="${c.via === 'private' ? 'on' : ''}">Private ${esc(c.privateIp)}</button><button data-via="public" class="${c.via === 'public' ? 'on' : ''}">Public ${esc(c.publicIp)}</button></div>` : '';
+  const priv = c.privateIps || (c.privateIp ? [c.privateIp] : []);
+  const viaSw = priv.length ? `<div class="tabs" style="margin:0 0 10px">${priv.map((ip) => `<button data-via="${esc(ip)}" class="${c.server === ip ? 'on' : ''}">Private ${esc(ip)}</button>`).join('')}<button data-via="public" class="${c.via === 'public' ? 'on' : ''}">Public ${esc(c.publicIp)}</button></div>` : '';
   openModal(`Peer config · ${p.name}`, `<div class="mbody">
     <p class="hint" style="margin-bottom:12px">Give these details to the customer. They point their Asterisk at your server; calls over ${c.limit} at once get <b>503</b>.</p>
     <p class="hint" style="margin-bottom:12px">Outbound: dial the <b>customer number</b> with <span class="mono">CALLERID(num)</span> = a caller-ID DID of the trunk
