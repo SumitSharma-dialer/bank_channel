@@ -69,7 +69,11 @@ function assertName(n, kind) {
 }
 
 // ---------------------------------------------------------------- trunks.conf
-function renderTrunks(trunks) {
+// opts.trunkMedia = { trunk name: local IP } for carriers on a source-routed port (ip rule "from <ip>"), e.g. a second
+// Airtel trunk on eno3 whose media IPs are the same as the first one's on eno2: Asterisk's RTP is bound to that IP so
+// the kernel sends it by the port's own routing table (apply.js finds these IPs; other trunks are left as they were).
+const IPV4_RE = /^(?:\d{1,3}\.){3}\d{1,3}$/;
+function renderTrunks(trunks, opts = {}) {
   let out = HEADER('Carrier SIP trunks (pjsip)');
   for (const t of trunks.filter((x) => x.active)) {
     assertName(t.name, 'trunk');
@@ -96,7 +100,7 @@ function renderTrunks(trunks) {
       `disallow=all\nallow=${codecs(t.codecs)}\naors=${id}\n` +
       (hasAuth ? `outbound_auth=${id}-auth\n` : '') +
       (t.from_user ? `from_user=${clean(t.from_user)}\n` : '') +
-      (fromDomain ? `from_domain=${clean(fromDomain)}\n` : '') + proxy +
+      (fromDomain ? `from_domain=${clean(fromDomain)}\n` : '') + proxy + mediaBind(t, opts) +
       `direct_media=no\nrtp_symmetric=yes\nforce_rport=yes\nrewrite_contact=yes\n` +
       `send_rpid=yes\nsend_pai=yes\ntrust_id_outbound=yes\ntimers=no\n\n`;
     out += `[${id}-identify]\ntype=identify\nendpoint=${id}\nmatch=${host}\n\n`;
@@ -108,6 +112,11 @@ function renderTrunks(trunks) {
     }
   }
   return out;
+}
+
+function mediaBind(t, opts) {
+  const ip = ((opts && opts.trunkMedia) || {})[t.name];
+  return IPV4_RE.test(ip || '') ? `media_address=${ip}\nbind_rtp_to_media_address=yes\n` : '';
 }
 
 // ------------------------------------------------------------- processes.conf

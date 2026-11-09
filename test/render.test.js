@@ -32,6 +32,11 @@ test('trunk password keeps # and [ ], escapes ;', () => {
 
 test('inactive trunk is not rendered', () => {
   assert.ok(!renderTrunks([{ ...trunk, active: false }]).includes('[t_airtel1]'));
+  // carrier on a source-routed port: RTP bound to that port's IP; other trunks unchanged
+  const m = renderTrunks([trunk], { trunkMedia: { [trunk.name]: '10.16.159.34' } });
+  assert.ok(m.includes('media_address=10.16.159.34\nbind_rtp_to_media_address=yes\n'));
+  assert.ok(!renderTrunks([trunk]).includes('media_address'), 'no port IP: no media bind');
+  assert.ok(!renderTrunks([trunk], { trunkMedia: { other: '10.16.159.34' } }).includes('media_address'));
 });
 
 test('password process uses auth_username identification', () => {

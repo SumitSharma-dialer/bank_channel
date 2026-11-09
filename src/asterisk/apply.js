@@ -3,6 +3,7 @@
 // This is THE integration point between the UI and Asterisk.
 const fs = require('fs/promises');
 const path = require('path');
+const { execFile } = require('child_process');
 const cfg = require('../config');
 const { q } = require('../db');
 const ari = require('../ari');
@@ -28,10 +29,28 @@ async function loadRows() {
   return { trunks, processes, rejectCodes };
 }
 
+const sh = (args) => new Promise((resolve) => {
+  execFile('ip', args, { timeout: 2000 }, (err, out) => resolve(err ? '' : String(out || '')));
+});
+const IP_RE = /^(?:\d{1,3}\.){3}\d{1,3}$/;
+// Carriers on a source-routed port (netplan routing-policy "from <port ip>", e.g. Airtel #2 on eno3, table 103):
+// { trunk name: port IP } when the kernel reaches the trunk host from an IP that has its own `ip rule from <ip>`.
+// Trunks on ordinary host routes (e.g. Airtel #1 on eno2) are not listed and render exactly as before.
+async function trunkMedia(trunks) {
+  const ruled = new Set([...(await sh(['-4', 'rule', 'list'])).matchAll(/\bfrom (\d+\.\d+\.\d+\.\d+)(?:\/32)?\s+lookup/g)].map((m) => m[1]));
+  const out = {};
+  if (!ruled.size) return out;
+  for (const t of trunks.filter((x) => x.active && IP_RE.test(String(x.host).trim()))) {
+    const src = (/\bsrc (\d+\.\d+\.\d+\.\d+)/.exec(await sh(['-o', 'route', 'get', String(t.host).trim()])) || [])[1];
+    if (src && ruled.has(src)) out[t.name] = src;
+  }
+  return out;
+}
+
 async function renderAll() {
   const { trunks, processes, rejectCodes } = await loadRows();
   return {
-    'trunks.conf': renderTrunks(trunks),
+    'trunks.conf': renderTrunks(trunks, { trunkMedia: await trunkMedia(trunks) }),
     'processes.conf': renderProcesses(processes),
     'dialplan.conf': renderDialplan(processes, trunks, cfg.statsTz, `http://127.0.0.1:${cfg.http.port}/internal/did-route`, rejectCodes),
   };

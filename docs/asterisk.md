@@ -60,6 +60,15 @@ Trunks: `context=sd-in-<name>` if inbound allowed and DID ranges exist, else `sd
 `rtp_symmetric=yes`, `force_rport=yes`, `rewrite_contact=yes`, `send_rpid=yes`, `trust_id_outbound=yes`, `timers=no`,
 `qualify_frequency=60`. Registration: retry 30 s, forbidden/fatal retry 300 s, expiration 3600, `line=yes`.
 
+Carriers on a **source-routed port** also get `media_address=<port IP>` + `bind_rtp_to_media_address=yes`.
+`apply.js` adds them when the kernel reaches the trunk host (`ip route get`) from an IP that has its own
+`ip rule from <ip>`. This is needed when two carriers share the same media IPs on different ports. Example: Airtel #1
+`airtel_ringline` on `eno2` uses main-table host routes to 10.5.110.x (`/etc/netplan/61-carrier-ringline-airtel.yaml`).
+Airtel #2 `airtel_ringline2` on `eno3` (10.16.159.34/30, gw .33, SBC 10.5.70.3, pilot 8049996050) reaches the same
+media IPs only for packets *from* 10.16.159.34, through `ip rule from 10.16.159.34 lookup 103`
+(`/etc/netplan/62-carrier-ringline-airtel-2.yaml`). Without the bind, Asterisk's RTP (bound to 0.0.0.0) for trunk #2
+would leave on eno2. Trunks on ordinary host routes render exactly as before.
+
 Processes: `context=proc-<code>`, `identify_by=ip`, `trust_id_inbound=yes`, `allow_subscribe=no`, AOR
 `contact=sip:<first fixed IP>:<sip_port>` (used for inbound calls to the customer; `sip_port` per process, default 5060).
 
