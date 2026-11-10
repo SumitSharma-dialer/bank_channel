@@ -98,7 +98,7 @@ Same rules and the same order as the Asterisk dialplan (see [asterisk.md](asteri
   (`From`, `P-Asserted-Identity`, `Remote-Party-ID`), trunk prefix / strip digits / CLI prefix applied. If the carrier
   asks for a password (401 / 407) the trunk's username + password are sent.
 - **Inbound** (carrier → process): DID range → process (`/internal/did-route` first, else the range's owner) →
-  the process's fixed IP, or the contact its server registered. Headers `X-DID` / `X-Number` are added.
+  the process's fixed IP, or the contact its server registered. Headers `X-DID` / `X-Number` / `X-Process` are added.
 - **Limits** = Kamailio dialog profiles `sdproc` / `sdtrunk`: join first, then count, like `GROUP()` in Asterisk.
 - **Topology hiding** (`topoh`): the carrier never sees a customer's address and the customer never sees the carrier's.
 

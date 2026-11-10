@@ -134,6 +134,21 @@ test('peer config contains public IP and credentials', () => {
   assert.ok(c.chan_sip.includes('host=203.0.113.10'));
 });
 
+test('peer config: every name per process, so several processes fit on one customer server', () => {
+  const a = peerConfig(proc, '203.0.113.10');
+  const b = peerConfig({ ...proc, code: 'beta', sip_username: 'beta' }, '203.0.113.10');
+  for (const s of ['[sipdist-acme]\ntype=aor', '[sipdist-acme-auth]', 'context=from-sipdist-acme\n', '[sipdist-acme-identify]', '[sipdist-acme-reg]',
+    '[from-internal-sipdist-acme]', 'Dial(PJSIP/${EXTEN}@sipdist-acme,60)', '[from-sipdist-acme]\n'])
+    assert.ok(a.pjsip.includes(s), s);
+  // no section name of one process appears in the other's config
+  const names = (t) => new Set([...t.matchAll(/^\[([^\]]+)\]/gm)].map((m) => m[1]));
+  for (const n of names(a.pjsip)) assert.ok(!names(b.pjsip).has(n), n);
+  for (const n of names(a.chan_sip)) assert.ok(!names(b.chan_sip).has(n), n);
+  // inbound for another process (same server IP) is handed over by X-Process
+  assert.ok(a.pjsip.includes('Set(SDPROC=${PJSIP_HEADER(read,X-Process)})') && a.pjsip.includes('"${SDPROC}" != "acme"]?from-sipdist-${SDPROC},${EXTEN},1)'));
+  assert.ok(a.chan_sip.includes('Set(SDPROC=${SIP_HEADER(X-Process)})') && a.chan_sip.includes('[sipdist-acme]\ntype=friend') && a.chan_sip.includes('context=from-sipdist-acme\n'));
+});
+
 test('inbound DIDs are routed only when the trunk allows inbound', () => {
   const did_ranges = [{ first_did: '912240001000', last_did: '912240001099', process_id: 1, use_as_cli: true }];
   const on = { ...trunk, did_ranges };
@@ -175,7 +190,8 @@ test('inbound DID: app lookup, then assigned process; customer number dialed wit
   assert.ok(dp.includes('ExecIf($["${SD_INPROC}" = ""]?Set(SD_INPROC=${SD_ASG}))'));
   assert.ok(dp.includes('GotoIf($["${SD_INPROC}" = "acme"]?in_acme)'));
   assert.ok(dp.includes('Set(CALLERID(all)=${SD_DIDM} <${SD_DIDM}>)'), 'caller ID = DID');
-  assert.ok(dp.includes('Dial(PJSIP/${SD_OUT}@p_acme,45,b(sd-inhdr^s^1(${SD_DIDM},${SD_CUST})))'), 'customer number + headers');
+  assert.ok(dp.includes('Dial(PJSIP/${SD_OUT}@p_acme,45,b(sd-inhdr^s^1(${SD_DIDM},${SD_CUST},acme)))'), 'customer number + headers');
+  assert.ok(dp.includes('PJSIP_HEADER(add,X-Process)=${ARG3}'), 'X-Process header');
   assert.ok(dp.includes('[sd-inhdr]') && dp.includes('PJSIP_HEADER(add,X-DID)'));
   assert.ok(!renderDialplan([ip], [t]).includes('CURL('), 'no lookup URL -> assigned only');
 });
@@ -205,7 +221,7 @@ test("contexts with a catch-all '_[#-~]!' have an explicit h extension", () => {
 
 test('password peer config always registers (online status + inbound), IP peer config never', () => {
   const pw = peerConfig(proc, '10.0.0.1', 5060, []);
-  assert.ok(pw.pjsip.includes('[sipdist-reg]\ntype=registration') && pw.chan_sip.includes('register => p_acme:secret123:acme@10.0.0.1:5060'));
+  assert.ok(pw.pjsip.includes('[sipdist-acme-reg]\ntype=registration') && pw.chan_sip.includes('register => p_acme:secret123:acme@10.0.0.1:5060'));
   const ip = peerConfig({ ...proc, auth_type: 'ip', allowed_ips: '1.2.3.4' }, '10.0.0.1', 5060, ['1240-1249']);
   assert.ok(ip.pjsip.includes('Set(CALLERID(num)=1240)') && ip.chan_sip.includes('Set(CALLERID(num)=1240)'), 'example DID = first own DID');
   assert.ok(!ip.pjsip.includes('type=registration') && !ip.chan_sip.includes('register =>'));
@@ -216,10 +232,10 @@ test('peer config: pjsip.conf + extensions.conf as separate files, from_user sta
   assert.deepStrictEqual(c.files.pjsip.map((f) => f.name), ['pjsip.conf', 'extensions.conf']);
   assert.deepStrictEqual(c.files.chan_sip.map((f) => f.name), ['sip.conf', 'extensions.conf']);
   const [pj, ext] = c.files.pjsip.map((f) => f.text);
-  assert.ok(pj.startsWith('[sipdist]\ntype=aor\n') && pj.includes('from_user=p_acme') && !pj.includes('exten'));
-  assert.ok(ext.startsWith('[from-internal-sipdist]\n') && ext.includes('Set(CALLERID(num)=1234)') && ext.includes(' same => n,Dial(PJSIP/${EXTEN}@sipdist,60)') && ext.includes('[from-sipdist]'));
-  assert.ok(pj.includes('send_pai=yes') && c.chan_sip.includes('sendrpid=pai') && c.chan_sip.includes('Dial(SIP/${EXTEN}@sipdist,60)'), 'DID also sent as P-Asserted-Identity');
-  assert.ok(c.pjsip.startsWith('pjsip.conf\n\n[sipdist]') && c.pjsip.includes('\n\nextensions.conf\n\n[from-internal-sipdist]'));
+  assert.ok(pj.startsWith('; process acme') && pj.includes('\n[sipdist-acme]\ntype=aor\n') && pj.includes('from_user=p_acme') && !pj.includes('exten'));
+  assert.ok(ext.startsWith('[from-internal-sipdist-acme]\n') && ext.includes('Set(CALLERID(num)=1234)') && ext.includes(' same => n,Dial(PJSIP/${EXTEN}@sipdist-acme,60)') && ext.includes('[from-sipdist-acme]'));
+  assert.ok(pj.includes('send_pai=yes') && c.chan_sip.includes('sendrpid=pai') && c.chan_sip.includes('Dial(SIP/${EXTEN}@sipdist-acme,60)'), 'DID also sent as P-Asserted-Identity');
+  assert.ok(c.pjsip.startsWith('pjsip.conf\n\n; process acme') && c.pjsip.includes('\n\nextensions.conf\n\n[from-internal-sipdist-acme]'));
 });
 
 test('test-call contexts: dial the trunk from the Local extension, report leg + result by UserEvent', () => {

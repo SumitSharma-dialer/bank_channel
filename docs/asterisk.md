@@ -80,7 +80,7 @@ matching transport).
 | Context | Purpose |
 |---|---|
 | `[sd-hangup]` | Hangup handler on every SIPDist channel. Fills `SD_DISP` from `DIALSTATUS` if empty, sends `UserEvent(SIPDIST_END, proc, trunk, num, out, cli, cliout, disp, dialstatus, cause, start, end, bill, dialed, uid, linked, src, dir, did, hst, hdid, hnum)` |
-| `[sd-inhdr]` | Pre-dial subroutine on inbound legs: adds `X-DID` / `X-Number` headers |
+| `[sd-inhdr]` | Pre-dial subroutine on inbound legs: adds `X-DID` / `X-Number` / `X-Process` headers |
 | `[sd-from-trunk]` | Rejects carrier calls (cause 21) on trunks without inbound |
 | `[proc-<code>]` | Outbound: dummy number → header checks → hours → limits → Dial trunk. Any other number → INVALID |
 | `[sd-didok-<trunk>]` | Sets `SD_DIDOK=1` if `SD_DID` is inside a caller-ID range |
@@ -104,11 +104,17 @@ SD_DID, SD_DIDUSED, SD_DIDOK, SD_HST, SD_HDID, SD_HNUM, SD_CNUM, SD_DEST, SD_INP
 ## Customer-side configuration
 
 The UI (Processes → peer config, `GET /api/processes/:id/peer-config`) generates a ready PJSIP and chan_sip/ViciDial
-sample for the customer: an endpoint `sipdist` pointing at `PUBLIC_IP:SIP_PORT`, and a dialplan that dials the
+sample for the customer: an endpoint `sipdist-<code>` pointing at `PUBLIC_IP:SIP_PORT`, and a dialplan that dials the
 dummy number with headers `X-DID: <caller-ID DID>` and `X-Number: <customer number>`. Inbound calls arrive at the
-customer in context `from-sipdist` (number = caller, caller ID = DID). Password-auth processes also get a registration
-(`[sipdist-reg] type=registration`, chan_sip `register =>`), always — it makes them show online and receive inbound
+customer in context `from-sipdist-<code>` (number = caller, caller ID = DID). Password-auth processes also get a registration
+(`[sipdist-<code>-reg] type=registration`, chan_sip `register =>`), always — it makes them show online and receive inbound
 DID calls / callbacks. IP-auth processes get none.
+
+Every name in the sample carries the process code (`sipdist-<code>`, `from-sipdist-<code>`,
+`from-internal-sipdist-<code>`), so one customer server can hold the config of several processes side by side
+(password auth; IP-auth processes can't share an IP on our side). All of them match this server's IP, so the customer's
+Asterisk may identify an inbound call as any of them; every inbound leg carries `X-Process: <code>`, and each
+`from-sipdist-<code>` context first jumps to `from-sipdist-<X-Process>` when the header names another process.
 
 ## Useful Asterisk commands
 

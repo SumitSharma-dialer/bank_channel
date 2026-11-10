@@ -183,9 +183,11 @@ exten => s,1,ExecIf($["\${SD_DISP}" = ""]?Set(SD_DISP=\${IF($["\${DIALSTATUS}" =
  same => n,Return()
 
 [sd-inhdr]
-; pre-dial on the leg to the process (inbound DID calls): ARG1 = DID, ARG2 = caller's number
+; pre-dial on the leg to the process (inbound DID calls): ARG1 = DID, ARG2 = caller's number, ARG3 = process code
+; (X-Process lets a customer server with several processes on one IP pick the right context, see peerConfig)
 exten => s,1,Set(PJSIP_HEADER(add,X-DID)=\${ARG1})
  same => n,Set(PJSIP_HEADER(add,X-Number)=\${ARG2})
+ same => n,Set(PJSIP_HEADER(add,X-Process)=\${ARG3})
  same => n,Return()
 
 [sd-from-trunk]
@@ -446,7 +448,7 @@ function inboundContext(t, processes, tz, routeUrl) {
       ` same => n,Set(SD_OUT=\${IF($["\${SD_CUST}" = ""]?\${SD_DIDM}:\${SD_CUST})})\n` +
       ` same => n,Set(CALLERID(all)=\${SD_DIDM} <\${SD_DIDM}>)\n` +
       ` same => n,Set(SD_CLIOUT=\${SD_DIDM})\n` +
-      ` same => n,Dial(PJSIP/\${SD_OUT}@p_${p.code},${timeout},b(sd-inhdr^s^1(\${SD_DIDM},\${SD_CUST})))\n same => n,Hangup()\n`;
+      ` same => n,Dial(PJSIP/\${SD_OUT}@p_${p.code},${timeout},b(sd-inhdr^s^1(\${SD_DIDM},\${SD_CUST},${p.code})))\n same => n,Hangup()\n`;
   }
   out += hangup('CHANNEL_LIMIT', 'plimit') + hangup('TRUNK_LIMIT', 'tlimit') + '\n';
   return out;
@@ -455,42 +457,50 @@ function inboundContext(t, processes, tz, routeUrl) {
 // ------------------------------------------------- config for the customer side
 // Two files per flavour, as the customer pastes them: pjsip.conf + extensions.conf, or sip.conf + extensions.conf.
 // from_user must stay p_<code>: Asterisk identifies the endpoint by that name (see renderProcesses).
+// Every name carries the process code (endpoint sipdist-<code>, contexts from-sipdist-<code> /
+// from-internal-sipdist-<code>), so one customer server can paste the config of several processes side by side.
+// All of them point at this server's IP, so an inbound call may be identified as any of them: the X-Process header
+// (added by [sd-inhdr] / sipdist.lua) sends it on to the right process's context.
 function peerConfig(p, publicIp, sipPort = 5060, dids = []) {
   const ip = clean(publicIp);
   const byIp = p.auth_type === 'ip';
   const user = clean(p.sip_username);
   const pass = clean(p.sip_password);
   const cli = (String(dids[0] || '').split('-')[0].match(/^\+?[0-9]{4,20}$/) || ['1234'])[0];   // example caller-ID DID
+  const ep = `sipdist-${p.code}`;
+  const ctxIn = `from-sipdist-${p.code}`;
+  const ctxOut = `from-internal-sipdist-${p.code}`;
   const pjsip =
-`[sipdist]
+`; process ${p.code} — every name ends in -${p.code}, so other processes' configs can sit next to this one
+[${ep}]
 type=aor
 contact=sip:${ip}:${sipPort}
 qualify_frequency=60
 ${byIp ? '' : `
-[sipdist-auth]
+[${ep}-auth]
 type=auth
 auth_type=userpass
 username=${user}
 password=${pass}
 `}
-[sipdist]
+[${ep}]
 type=endpoint
-context=from-sipdist
+context=${ctxIn}
 disallow=all
 allow=ulaw,alaw
-aors=sipdist
+aors=${ep}
 direct_media=no
 send_pai=yes
-${byIp ? '' : `outbound_auth=sipdist-auth\nfrom_user=p_${p.code}\n`}
-[sipdist-identify]
+${byIp ? '' : `outbound_auth=${ep}-auth\nfrom_user=p_${p.code}\n`}
+[${ep}-identify]
 type=identify
-endpoint=sipdist
+endpoint=${ep}
 match=${ip}
 ${byIp ? '' : `
 ; register: the distributor then shows you online and can send you inbound DID calls / callbacks
-[sipdist-reg]
+[${ep}-reg]
 type=registration
-outbound_auth=sipdist-auth
+outbound_auth=${ep}-auth
 server_uri=sip:${ip}:${sipPort}
 client_uri=sip:p_${p.code}@${ip}:${sipPort}
 contact_user=${user}
@@ -498,25 +508,29 @@ retry_interval=30
 expiration=300
 `}`;
   // outbound: dial the customer number with the DID as caller ID (also sent as P-Asserted-Identity, since From may
-  // carry p_<code>); inbound DID calls / callbacks
-  const inbound = (dids.length ? `; your inbound DIDs: ${dids.map(clean).join(', ')}\n` : '') +
-`[from-sipdist]
-exten => _X.,1,NoOp(inbound call from \${EXTEN} to DID \${CALLERID(num)})
+  // carry p_<code>); inbound DID calls / callbacks. X-Process names the process the call is for: with several
+  // processes on this server the call can land in another process's context, which hands it over.
+  const inbound = (hdr) => (dids.length ? `; your inbound DIDs: ${dids.map(clean).join(', ')}\n` : '') +
+`[${ctxIn}]
+exten => _X.,1,Set(SDPROC=\${${hdr}})
+ same => n,GotoIf($["\${SDPROC}" != "" & "\${SDPROC}" != "${p.code}"]?from-sipdist-\${SDPROC},\${EXTEN},1)
+ same => n,NoOp(inbound call from \${EXTEN} to DID \${CALLERID(num)} for process ${p.code})
  same => n,Goto(from-pstn,\${EXTEN},1)
 `;
   const extPjsip =
-`[from-internal-sipdist]
+`[${ctxOut}]
 exten => _X.,1,Set(CALLERID(num)=${cli})   ; <- DID to show as caller ID
- same => n,Dial(PJSIP/\${EXTEN}@sipdist,60)
+ same => n,Dial(PJSIP/\${EXTEN}@${ep},60)
  same => n,Hangup()
 
-${inbound}`;
+${inbound('PJSIP_HEADER(read,X-Process)')}`;
   const sipConf =
-`[sipdist]
+`; process ${p.code} — every name ends in -${p.code}, so other processes' configs can sit next to this one
+[${ep}]
 type=friend
 host=${ip}
 port=${sipPort}
-${byIp ? '' : `username=${user}\nsecret=${pass}\nfromuser=p_${p.code}\n`}context=from-sipdist
+${byIp ? '' : `username=${user}\nsecret=${pass}\nfromuser=p_${p.code}\n`}context=${ctxIn}
 disallow=all
 allow=ulaw
 allow=alaw
@@ -529,12 +543,12 @@ ${byIp ? '' : `
 register => p_${p.code}:${pass}:${user}@${ip}:${sipPort}
 `}`;
   const extSip =
-`[from-internal-sipdist]
+`[${ctxOut}]
 exten => _X.,1,Set(CALLERID(num)=${cli})   ; <- DID to show as caller ID
- same => n,Dial(SIP/\${EXTEN}@sipdist,60)
+ same => n,Dial(SIP/\${EXTEN}@${ep},60)
  same => n,Hangup()
 
-${inbound}`;
+${inbound('SIP_HEADER(X-Process)')}`;
   const tidy = (t) => t.replace(/\n{3,}/g, '\n\n').trim() + '\n';
   const files = {
     pjsip: [{ name: 'pjsip.conf', text: tidy(pjsip) }, { name: 'extensions.conf', text: tidy(extPjsip) }],

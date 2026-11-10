@@ -12,7 +12,7 @@ local REASON = { [403] = "Forbidden", [404] = "Not Found", [408] = "Request Time
   [502] = "Bad Gateway", [503] = "Service Unavailable" }
 local RTP = "replace-origin replace-session-connection ICE=remove RTP/AVP"
 -- never passed on: the distributor's own headers, credentials, and identity headers it sets itself
-local STRIP = { "X-DID", "X-Number", "P-Asserted-Identity", "P-Preferred-Identity", "Remote-Party-ID" }
+local STRIP = { "X-DID", "X-Number", "X-Process", "P-Asserted-Identity", "P-Preferred-Identity", "Remote-Party-ID" }
 
 local function pv(name)
   local v = KSR.pv.gete(name)
@@ -239,7 +239,7 @@ local function call_out(p, ip)
 end
 
 -- carrier -> process: the dialed DID picks the process (the app knows who last used it, else the range's owner).
--- The process gets: dialed number = the caller's number, caller ID = the DID, plus X-DID / X-Number.
+-- The process gets: dialed number = the caller's number, caller ID = the DID, plus X-DID / X-Number / X-Process.
 local function call_in(t, ip)
   local num = pv("$rU")
   if #t.in_ranges == 0 or not num:find("^[+0-9].") then
@@ -286,7 +286,7 @@ local function call_in(t, ip)
   end
   relay(c, { ruri = ruri, du = du ~= "" and du or nil, dir = { t.iface, D.pub_iface }, cli = did, from_user = did, from_dom = D.self_ip,
     to = "sip:" .. out .. "@" .. D.self_ip, codecs = p.codecs, timeout = t.timeout,
-    hdrs = { "X-DID: " .. did, "X-Number: " .. cust } })
+    hdrs = { "X-DID: " .. did, "X-Number: " .. cust, "X-Process: " .. p.code } })
 end
 
 local function register(ip)
