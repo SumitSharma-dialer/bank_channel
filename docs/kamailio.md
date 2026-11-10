@@ -93,7 +93,11 @@ Same rules and the same order as the Asterisk dialplan (see [asterisk.md](asteri
 
 - **Who is calling** — carrier: source IP = trunk host. Process: source IP (IP auth, CIDR allowed), or digest
   username + password (realm `asterisk`, optional IP lock).
-- **Outbound** (process → trunk): dialed number must be the dummy number; `X-DID` / `X-Number` checked; working time;
+  `OPTIONS` are answered for trunks and for every process identified this way (also on a shared IP, by `From: p_<code>`),
+  so the customer's qualify sees us reachable; strangers get no answer.
+- **Outbound** (process → trunk), as on Asterisk: the dummy number with `X-DID` / `X-Number` (header dialing), or the
+  customer number with caller ID = DID (`P-Asserted-Identity` user, else `From` user — caller-ID dialing, what the
+  peer config sends); DID / number checked; working time;
   process limit, trunk limit, trunk CPS; then the call goes to the trunk with the DID as caller ID
   (`From`, `P-Asserted-Identity`, `Remote-Party-ID`), trunk prefix / strip digits / CLI prefix applied. If the carrier
   asks for a password (401 / 407) the trunk's username + password are sent.

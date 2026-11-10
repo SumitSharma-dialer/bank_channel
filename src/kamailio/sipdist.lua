@@ -200,17 +200,26 @@ local function limits(c, p, t)
   return true
 end
 
--- process -> trunk. The customer dials its dummy number; X-DID = caller ID (a caller-ID DID of the trunk),
--- X-Number = the number to call.
+-- process -> trunk, two ways (as in Asterisk's [proc-<code>]):
+--  - header dialing: the customer dials its dummy number; X-DID = caller ID (a caller-ID DID of the trunk),
+--    X-Number = the number to call
+--  - caller-ID dialing: the customer dials the number to call with caller ID = the DID (P-Asserted-Identity, which
+--    the peer config sends because From carries p_<code>; else the From user)
 local function call_out(p, ip)
   local c = { e = "end", id = pv("$ci"), dir = "out", proc = p.code, trunk = p.trunk_name or "", num = pv("$rU"),
     cli = pv("$fU"), src = ip, start = os.time() }
   if not p.active or not p.out then return reject(c, "BLOCKED") end
   local t = p.trunk and D.trunks[p.trunk]
   if not t then return reject(c, "NO_ROUTE") end
-  if not p.dummy or c.num ~= p.dummy then return reject(c, "INVALID") end
-
-  local hd, hn = pv("$hdr(X-DID)"), pv("$hdr(X-Number)")
+  local hd, hn
+  if p.dummy and c.num == p.dummy then
+    hd, hn = pv("$hdr(X-DID)"), pv("$hdr(X-Number)")
+  elseif c.num:find("^%+?%d+$") then
+    local ai = pv("$(ai{uri.user})")
+    hd, hn = ai ~= "" and ai or c.cli, c.num
+  else
+    return reject(c, "INVALID")
+  end
   c.hdid = (hd:gsub("[^0-9a-zA-Z+.]", "")):sub(1, 40)
   c.hnum = (hn:gsub("[^0-9a-zA-Z+.]", "")):sub(1, 40)
   local did, num = digits(hd):sub(-10), digits(hn)
@@ -358,7 +367,9 @@ function ksr_request_route()
   local ip = pv("$si")
   local tn = D.ip2trunk[ip]
   if m == "OPTIONS" then
-    if tn or proc_by_ip(ip) then KSR.sl.sl_send_reply(200, "OK") end   -- strangers get no answer
+    -- trunks and customers get 200 (their qualify marks us reachable; customers on a shared IP are known by From
+    -- p_<code> / user name, as for calls); strangers get no answer
+    if tn or identify(ip) then KSR.sl.sl_send_reply(200, "OK") end
     return 1
   end
   if m == "REGISTER" then
