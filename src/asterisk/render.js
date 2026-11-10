@@ -396,7 +396,7 @@ function didCliContext(t) {
 // [sd-in-<trunk>]: carrier calls a DID -> DID must be in one of the trunk's ranges -> pick the process:
 //   1. ask the app (routeUrl): process that last called this caller with this DID as caller ID, else the last
 //      process that used the DID as caller ID   2. else the process the range is assigned to   3. else NO_ROUTE.
-// The call goes to the process's fixed IP: dialed number = the caller's (customer) number, caller ID = the DID,
+// The call goes to the process's fixed IP: dialed number = the DID, caller ID = the caller's (customer) number,
 // plus headers X-DID / X-Number.
 function inboundContext(t, processes, tz, routeUrl) {
   const byId = new Map(processes.map((p) => [p.id, p]));
@@ -445,9 +445,9 @@ function inboundContext(t, processes, tz, routeUrl) {
       ` same => n,Set(GROUP(sdproc)=${p.code})\n` +
       ` same => n,GotoIf($[\${GROUP_COUNT(${p.code}@sdproc)} > ${+p.channel_limit}]?plimit)\n` +
       (lim > 0 ? ` same => n,Set(GROUP(sdtrunk)=${t.name})\n same => n,GotoIf($[\${GROUP_COUNT(${t.name}@sdtrunk)} > ${lim}]?tlimit)\n` : '') +
-      ` same => n,Set(SD_OUT=\${IF($["\${SD_CUST}" = ""]?\${SD_DIDM}:\${SD_CUST})})\n` +
-      ` same => n,Set(CALLERID(all)=\${SD_DIDM} <\${SD_DIDM}>)\n` +
-      ` same => n,Set(SD_CLIOUT=\${SD_DIDM})\n` +
+      ` same => n,Set(SD_OUT=\${SD_DIDM})\n` +
+      ` same => n,Set(CALLERID(all)=\${SD_CUST} <\${SD_CUST}>)\n` +
+      ` same => n,Set(SD_CLIOUT=\${SD_CUST})\n` +
       ` same => n,Dial(PJSIP/\${SD_OUT}@p_${p.code},${timeout},b(sd-inhdr^s^1(\${SD_DIDM},\${SD_CUST},${p.code})))\n same => n,Hangup()\n`;
   }
   out += hangup('CHANNEL_LIMIT', 'plimit') + hangup('TRUNK_LIMIT', 'tlimit') + '\n';
@@ -514,7 +514,7 @@ expiration=300
 `[${ctxIn}]
 exten => _X.,1,Set(SDPROC=\${${hdr}})
  same => n,GotoIf($["\${SDPROC}" != "" & "\${SDPROC}" != "${p.code}"]?from-sipdist-\${SDPROC},\${EXTEN},1)
- same => n,NoOp(inbound call from \${EXTEN} to DID \${CALLERID(num)} for process ${p.code})
+ same => n,NoOp(inbound call to DID \${EXTEN} from \${CALLERID(num)} for process ${p.code})
  same => n,Goto(from-pstn,\${EXTEN},1)
 `;
   const extPjsip =

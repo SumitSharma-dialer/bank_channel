@@ -239,7 +239,7 @@ local function call_out(p, ip)
 end
 
 -- carrier -> process: the dialed DID picks the process (the app knows who last used it, else the range's owner).
--- The process gets: dialed number = the caller's number, caller ID = the DID, plus X-DID / X-Number / X-Process.
+-- The process gets: dialed number = the DID, caller ID = the caller's number, plus X-DID / X-Number / X-Process.
 local function call_in(t, ip)
   local num = pv("$rU")
   if #t.in_ranges == 0 or not num:find("^[+0-9].") then
@@ -267,8 +267,8 @@ local function call_in(t, ip)
   if not open_now(p.in_hours) then return reject(c, "OFF_HOURS") end
   if not limits(c, p, t) then return end
 
-  local out = cust ~= "" and cust or did
-  c.out, c.cliout = out, did
+  local out, cli = did, cust ~= "" and cust or "anonymous"
+  c.out, c.cliout = out, cust
   local ruri, du
   if p.dst then
     ruri = "sip:" .. out .. "@" .. p.dst:sub(5)
@@ -284,7 +284,7 @@ local function call_in(t, ip)
     KSR.pv.sets("$rU", out)
     ruri, du = pv("$ru"), pv("$du")
   end
-  relay(c, { ruri = ruri, du = du ~= "" and du or nil, dir = { t.iface, D.pub_iface }, cli = did, from_user = did, from_dom = D.self_ip,
+  relay(c, { ruri = ruri, du = du ~= "" and du or nil, dir = { t.iface, D.pub_iface }, cli = cli, from_user = cli, from_dom = D.self_ip,
     to = "sip:" .. out .. "@" .. D.self_ip, codecs = p.codecs, timeout = t.timeout,
     hdrs = { "X-DID: " .. did, "X-Number: " .. cust, "X-Process: " .. p.code } })
 end

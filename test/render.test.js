@@ -181,7 +181,7 @@ test('inbound DID: disabled -> BLOCKED, working time gate per process', () => {
   assert.ok(on.includes('GotoIfTime(10:00-14:00,sat&sun,*,*,Asia/Kolkata?in_acme_open)') && on.includes('@p_acme,45,'));
 });
 
-test('inbound DID: app lookup, then assigned process; customer number dialed with the DID as caller ID', () => {
+test('inbound DID: app lookup, then assigned process; DID dialed with the customer number as caller ID', () => {
   const t = { ...trunk, did_ranges: [{ first_did: '1234', last_did: '1256', process_id: 1, use_as_cli: true }, { first_did: '23456', last_did: '23489', process_id: null, use_as_cli: true }] };
   const ip = { ...proc, auth_type: 'ip', allowed_ips: '1.2.3.4' };
   const dp = renderDialplan([ip], [t], 'Asia/Kolkata', 'http://127.0.0.1:3000/internal/did-route');
@@ -189,8 +189,9 @@ test('inbound DID: app lookup, then assigned process; customer number dialed wit
   assert.ok(dp.includes('Set(SD_ASG=acme)') && dp.includes('Set(SD_ASG=)'), 'assigned fallback per range');
   assert.ok(dp.includes('ExecIf($["${SD_INPROC}" = ""]?Set(SD_INPROC=${SD_ASG}))'));
   assert.ok(dp.includes('GotoIf($["${SD_INPROC}" = "acme"]?in_acme)'));
-  assert.ok(dp.includes('Set(CALLERID(all)=${SD_DIDM} <${SD_DIDM}>)'), 'caller ID = DID');
-  assert.ok(dp.includes('Dial(PJSIP/${SD_OUT}@p_acme,45,b(sd-inhdr^s^1(${SD_DIDM},${SD_CUST},acme)))'), 'customer number + headers');
+  assert.ok(dp.includes('Set(SD_OUT=${SD_DIDM})'), 'dials the DID');
+  assert.ok(dp.includes('Set(CALLERID(all)=${SD_CUST} <${SD_CUST}>)'), 'caller ID = customer number');
+  assert.ok(dp.includes('Dial(PJSIP/${SD_OUT}@p_acme,45,b(sd-inhdr^s^1(${SD_DIDM},${SD_CUST},acme)))'), 'DID + headers');
   assert.ok(dp.includes('PJSIP_HEADER(add,X-Process)=${ARG3}'), 'X-Process header');
   assert.ok(dp.includes('[sd-inhdr]') && dp.includes('PJSIP_HEADER(add,X-DID)'));
   assert.ok(!renderDialplan([ip], [t]).includes('CURL('), 'no lookup URL -> assigned only');

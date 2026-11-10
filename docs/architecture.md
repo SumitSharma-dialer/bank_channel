@@ -125,8 +125,8 @@ the trunk uses `[sd-from-trunk]` which rejects everything.
    3. else `NO_ROUTE`.
 4. Process inactive / inbound disabled → `BLOCKED`; no fixed IP → `NO_ROUTE`; inbound hours (`in_hours`) → `OFF_HOURS`;
    then the same group-count limits.
-5. `Dial(PJSIP/<caller number>@p_<code>)` to the customer's first fixed IP (`[p_<code>]` AOR `contact=sip:<ip>:<sip_port>`, default 5060),
-   caller ID = DID, plus headers `X-DID` / `X-Number` added by `[sd-inhdr]`.
+5. `Dial(PJSIP/<DID>@p_<code>)` to the customer's first fixed IP (`[p_<code>]` AOR `contact=sip:<ip>:<sip_port>`, default 5060),
+   caller ID = caller (customer) number, plus headers `X-DID` / `X-Number` added by `[sd-inhdr]`.
 
 ## Dispositions
 
